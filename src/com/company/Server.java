@@ -26,6 +26,7 @@ public class Server{
             serverSocket.bind(serverAddress);
             serverSocket.configureBlocking(false);
         } catch (IOException e) {
+            e.printStackTrace();
         }
     }
     public void run() throws IOException {
@@ -53,14 +54,12 @@ public class Server{
                         String[] msgParts = msgText.split("\\$");
                         if(msgParts[0].equals("LOGIN")){
                             if(keyBindings.containsKey(msgParts[1])){
-                                ByteBuffer errorMsg = ByteBuffer.wrap(new String("The name is already used. Please use another name.").getBytes());
-                                client.write(errorMsg);
+                                sendInfo(currentKey,"FAIL$The name is already used. Please use another name.");
                                 client.close();
                             } else {
                                 usernames.put(currentKey, msgParts[1]);
                                 keyBindings.put(msgParts[1], currentKey);
-                                ByteBuffer welcomeMsg = ByteBuffer.wrap(new String("Logged in as "+ msgParts[1]).getBytes());
-                                client.write(welcomeMsg);
+                                sendInfo(currentKey,"Logged in as "+ msgParts[1]);
                                 System.out.println(msgParts[1] + " Logged in from " + client.getRemoteAddress());
                             }
                         } else {
@@ -79,19 +78,55 @@ public class Server{
     void handleMessage(SelectionKey key, String msgText) throws IOException{
         if(!msgText.isEmpty()){
             String[] msgParts = msgText.split("\\$");
-            if(msgParts[0].equals("LOGOUT")) {
-                String username = usernames.get(key);
-                usernames.remove(key);
-                keyBindings.remove(username);
-                ByteBuffer infoMsg = ByteBuffer.wrap(new String("Logged out").getBytes());
-                SocketChannel client = (SocketChannel) key.channel();
-                client.write(infoMsg);
-                System.out.println(username + " logged out" );
-                client.close();
+            switch (msgParts[0]) {
+                case "LOGOUT":
+                    String username = usernames.get(key);
+                    usernames.remove(key);
+                    keyBindings.remove(username);
+                    sendInfo(key, "Logged out");
+                    SocketChannel client = (SocketChannel) key.channel();
+                    System.out.println(username + " logged out");
+                    client.close();
+                    break;
+                case "MSG":
+                    String sender = usernames.get(key);
+                    String receiver = msgParts[1];
+                    SelectionKey receiverKey = keyBindings.get(receiver);
+                    if(receiverKey == null){
+                        sendInfo(key, receiver + " is not online");
+                    } else {
+                        sendMsg(sender, receiverKey, msgParts[2]);
+                    }
+                    System.out.println(sender + " -> " + receiver + ": " + msgText);
+                    break;
             }
+        }
+    }
 
-            String username = usernames.get(key);
-            System.out.println(username + ": " + msgText);
+    void sendInfo(SelectionKey key, String info){
+        SocketChannel client = (SocketChannel) key.channel();
+        if(client.isOpen()) {
+            String infoText = "INFO$" + info;
+            ByteBuffer infoMsg = ByteBuffer.wrap(infoText.getBytes());
+            try {
+                client.write(infoMsg);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            infoMsg.clear();
+        }
+    }
+
+    void sendMsg(String sender, SelectionKey receiverKey, String msg){
+        SocketChannel client = (SocketChannel) receiverKey.channel();
+        if(client.isOpen()) {
+            String msgText = "MSG$" + sender + "$" + msg;
+            ByteBuffer msgBuf = ByteBuffer.wrap(msgText.getBytes());
+            try {
+                client.write(msgBuf);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
     }
 }
