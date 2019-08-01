@@ -49,6 +49,7 @@ public class Server{
                     SocketChannel client = (SocketChannel) currentKey.channel();
                     ByteBuffer buf = ByteBuffer.allocate(200);
                     client.read(buf);
+                    buf.flip();
                     String msgText = new String(buf.array()).trim();
                     if(!usernames.containsKey(currentKey)){
                         String[] msgParts = msgText.split("\\$");
@@ -95,7 +96,9 @@ public class Server{
                     if(receiverKey == null){
                         sendInfo(key, receiver + " is not online");
                     } else {
-                        sendMsg(sender, receiverKey, msgParts[2]);
+                        if(msgParts.length>2) {
+                            sendMsg(sender, receiverKey, msgParts[2]);
+                        }
                     }
                     System.out.println(sender + " -> " + receiver + ": " + msgText);
                     break;
@@ -107,13 +110,13 @@ public class Server{
         SocketChannel client = (SocketChannel) key.channel();
         if(client.isOpen()) {
             String infoText = "INFO$" + info;
-            ByteBuffer infoMsg = ByteBuffer.wrap(infoText.getBytes());
+            ByteBuffer infoBuf = ByteBuffer.wrap(infoText.getBytes());
             try {
-                client.write(infoMsg);
+                client.write(infoBuf);
             } catch (IOException e) {
                 e.printStackTrace();
             }
-            infoMsg.clear();
+            infoBuf.clear();
         }
     }
 
@@ -127,6 +130,7 @@ public class Server{
             } catch (IOException e) {
                 e.printStackTrace();
             }
+            msgBuf.clear();
         }
     }
 }

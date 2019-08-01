@@ -23,7 +23,11 @@ class ReaderThread extends Thread{
             } catch (IOException e){
                 e.printStackTrace();
             }
-            String msgText = new String(readBuf.array());
+            readBuf.flip();
+            byte[] msgBytes =  new byte[readBuf.remaining()];
+            readBuf.get(msgBytes);
+            String msgText = new String(msgBytes);
+            System.out.println("##"+msgText);
             String[] msgParts = msgText.split("\\$");
             switch (msgParts[0]){
                 case "MSG":
@@ -33,6 +37,11 @@ class ReaderThread extends Thread{
                     displayInfo(msgParts[1]);
                     break;
             }
+        }
+        try {
+            clientChannel.close();
+        } catch (IOException e){
+            e.printStackTrace();
         }
     }
 
@@ -78,7 +87,6 @@ class Client {
         rt.close();
         logout(client);
 
-        client.close();
     }
 
     void login(SocketChannel client, String username) throws IOException{
@@ -104,9 +112,5 @@ class Client {
         ByteBuffer writeBuf = ByteBuffer.wrap(messageBytes);
         client.write(writeBuf);
         writeBuf.clear();
-//        ByteBuffer infoBuf = ByteBuffer.allocate(100);
-//        infoBuf.clear();
-//        client.read(infoBuf);
-//        System.out.println(new String( infoBuf.array()).split("\\$")[1]);
     }
 }
