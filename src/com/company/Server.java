@@ -11,14 +11,12 @@ import java.util.*;
 
 public class Server{
     private ServerSocketChannel serverSocket;
-    HashMap<String, ArrayList<SelectionKey>> groups;
-    HashMap<SelectionKey, ArrayList<String>> userGroups;
     private UserDirectory ud;
+    private GroupDirectory gd;
 
     public Server(String hostname, int port) {
         ud = new UserDirectory();
-        groups = new HashMap<String, ArrayList<SelectionKey>>();
-        userGroups = new HashMap<SelectionKey, ArrayList<String>>();
+        gd = new GroupDirectory();
         InetSocketAddress serverAddress = new InetSocketAddress("localhost", 12121);
         try {
             serverSocket = ServerSocketChannel.open();
@@ -28,6 +26,7 @@ public class Server{
             e.printStackTrace();
         }
     }
+
     public void run() throws IOException {
         Selector selector = Selector.open();
         int ops = serverSocket.validOps();
@@ -74,41 +73,29 @@ public class Server{
         }
     }
 
-    void handleMessage(SelectionKey key, String msgText) throws IOException{
+    private void handleMessage(SelectionKey key, String msgText) throws IOException{
         if(!msgText.isEmpty()){
             String[] msgParts = msgText.split("\\$");
             String sender = ud.getName(key);
+            SocketChannel client = (SocketChannel) key.channel();
             switch (msgParts[0]) {
                 case "LOGOUT":
                     ud.deleteKey(key);
-                    if(userGroups.get(key) != null) {
-                        for (String grp : userGroups.get(key)) {
-                            ArrayList grpMembers = groups.get(grp);
-                            grpMembers.remove(key);
-                            if (grpMembers.size() == 0) {
-                                groups.remove(grp);
-                            } else {
-                                groups.put(grp, grpMembers);
-                            }
-                        }
-                    }
+                    gd.removeByKey(key);
 
                     sendInfo(key, "Logged out");
-                    SocketChannel client = (SocketChannel) key.channel();
                     log(sender + " logged out");
                     client.close();
                     break;
                 case "MSG":
-                    if(msgParts.length>0) {
+                    if(msgParts.length>2) {
                         String receiver = msgParts[1];
                         SelectionKey receiverKey = ud.getKey(receiver);
                         if (receiverKey == null) {
                             sendInfo(key, receiver + " is not online");
                         } else {
-                            if (msgParts.length > 2) {
-                                sendMsg(sender, receiverKey, msgParts[2]);
-                                log(sender + " -> " + receiver + ": " + msgText);
-                            }
+                            sendMsg(sender, receiverKey, msgParts[2]);
+                            log(sender + " -> " + receiver + ": " + msgText);
                         }
                     } else {
                         sendInfo(key, "Invalid command format");
@@ -118,21 +105,10 @@ public class Server{
                     //Creates a group and adds the sender in the group
                     if(msgParts.length>1){
                         String grpName = msgParts[1];
-                        if(groups.containsKey(grpName)){
+                        if(gd.groupExists(grpName)){
                             sendInfo(key,"Group name already in use. Please select a different name");
                         } else {
-                            ArrayList<SelectionKey> memberKeys = new ArrayList<SelectionKey>();
-                            memberKeys.add(key);
-                            groups.put(grpName, memberKeys);
-                            if(userGroups.containsKey(key)) {
-                                ArrayList<String> grps = userGroups.get(key);
-                                grps.add(grpName);
-                                userGroups.put(key, grps);
-                            } else {
-                                ArrayList<String> grps = new ArrayList<String>();
-                                grps.add(grpName);
-                                userGroups.put(key, grps);
-                            }
+                            gd.put(key, grpName);
                             sendInfo(key, "Group "+grpName+" has been created");
                         }
                     } else {
@@ -143,9 +119,9 @@ public class Server{
                     //Checks if the sender is admin and the user is online and adds in the group
                     if(msgParts.length>2){
                         String grpName = msgParts[1];
-                        if(grpName.isEmpty() || !groups.containsKey(grpName)){
+                        if(!gd.groupExists(grpName)){
                             sendInfo(key, "Group " + grpName + " not found");
-                        } else if(!key.equals(getGroupAdminKey(grpName))){
+                        } else if(!key.equals(gd.getGroupAdminKey(grpName))){
                             sendInfo(key, "Only Group Admin can add users");
                         }else {
                             String members = msgParts[2];
@@ -154,14 +130,9 @@ public class Server{
                                     sendInfo(key, "User " + member + " is not online");
                                 } else {
                                     SelectionKey memberKey = ud.getKey(member);
-                                    ArrayList grpMembers = groups.get(grpName);
-                                    if (!grpMembers.contains(memberKey)) {
-                                        grpMembers.add(memberKey);
-                                        groups.put(grpName, grpMembers);
-
-                                        ArrayList userGrps = userGroups.get(key);
-                                        userGrps.add(grpName);
-                                        userGroups.put(key, userGrps);
+                                    if (!gd.isInGroup(memberKey, grpName)) {
+                                        gd.put(memberKey, grpName);
+                                        sendGADD(memberKey, grpName);
                                         sendInfo(key, "User " + member + " is added to the group " + grpName);
                                     } else {
                                         sendInfo(key, "User " + member + " is already in the group " + grpName);
@@ -180,24 +151,14 @@ public class Server{
                     if(msgParts.length>2){
                         String grpName = msgParts[1];
                         String users = msgParts[2];
-                        if(!groups.containsKey(grpName)){
+                        if(!gd.groupExists(grpName)){
                             sendInfo(key, "Group "+ grpName + " does not exist or has been deleted");
-                        } else if(key.equals(getGroupAdminKey(grpName)) || (users.split(",").length==1 && users.split(",")[0].equals(ud.getName(key)))){
-                            ArrayList<SelectionKey> grpMembers = groups.get(grpName);
+                        } else if(key.equals(gd.getGroupAdminKey(grpName)) || (users.split(",").length==1 && users.split(",")[0].equals(ud.getName(key)))){
                             for(String user: users.split(",")){
-                                grpMembers.remove(user);
                                 SelectionKey userKey = ud.getKey(user);
-                                ArrayList<String> userGrps = userGroups.get(userKey);
-                                userGrps.remove(grpName);
-                                userGroups.put(userKey, userGrps);
+                                gd.removeFromGroup(userKey, grpName);
+                                sendGREMOVE(userKey, grpName);
                                 sendInfo(key, "User "+ user + " has been removed");
-                            }
-                            if(grpMembers.size()==0){
-                                groups.remove(grpName);
-                                System.out.println("AAA");
-                            } else {
-                                groups.put(grpName, grpMembers);
-                                System.out.println("BBB");
                             }
                         } else {
                             sendInfo(key, "You are not permitted to remove users from this group");
@@ -210,16 +171,13 @@ public class Server{
                     //Checks if user is admin and deletes the group
                     if(msgParts.length>1){
                         String grpName = msgParts[1];
-                        if(!groups.containsKey(grpName)){
+                        if(!gd.groupExists(grpName)){
                             sendInfo(key, "Group "+ grpName + " does not exist or has been deleted");
-                        } else if(key.equals(getGroupAdminKey(grpName))){
-                            ArrayList<SelectionKey> grpMembers = groups.get(grpName);
-                            for(SelectionKey memberKey: grpMembers){
-                                ArrayList userGrps = userGroups.get(memberKey);
-                                userGrps.remove(grpName);
-                                userGroups.put(memberKey, userGrps);
+                        } else if(key.equals(gd.getGroupAdminKey(grpName))){
+                            for(SelectionKey userKey: gd.removeByGroupname(grpName)){
+                                sendGDELETE(userKey, grpName);
                             }
-                            groups.remove(grpName);
+                            sendInfo(key, "The group "+grpName + " has been deleted");
                         } else {
                             sendInfo(key, "You are not permitted to delete this group");
                         }
@@ -232,10 +190,9 @@ public class Server{
                     if(msgParts.length>2){
                         String grpName = msgParts[1];
                         String msg = msgParts[2];
-                        if(!groups.containsKey(grpName)){
+                        if(!gd.groupExists(grpName)){
                             sendInfo(key, "Group "+ grpName + " does not exist or has been deleted");
-                        } else if (userGroups.get(key)!=null && userGroups.get(key).contains(grpName)) {
-                            //TODO
+                        } else if (gd.isInGroup(key,grpName)) {
                             sendGrpMsg(sender, grpName, msg);
                         } else {
                             sendInfo(key, "You are not a member of the group "+ grpName);
@@ -249,11 +206,7 @@ public class Server{
         }
     }
 
-    SelectionKey getGroupAdminKey(String grpName){
-        return groups.get(grpName).get(0);
-    }
-
-    void sendInfo(SelectionKey key, String info){
+    private void sendInfo(SelectionKey key, String info){
         SocketChannel client = (SocketChannel) key.channel();
         if(client.isOpen()) {
             String infoText = "INFO$" + info;
@@ -267,8 +220,56 @@ public class Server{
         }
     }
 
-    void sendGrpMsg(String sender, String grpName, String msg){
-        for(SelectionKey memberKey: groups.get(grpName)){
+    private void sendGADD(SelectionKey key, String grpName){
+        SocketChannel client = (SocketChannel) key.channel();
+        if(client.isOpen()) {
+            String text = "GADD$" + grpName;
+            ByteBuffer buf = ByteBuffer.wrap(text.getBytes());
+            try {
+                client.write(buf);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            buf.clear();
+
+            sendInfo(key, "You have been added to the group "+ grpName);
+        }
+    }
+
+    private void sendGREMOVE(SelectionKey key, String grpName){
+        SocketChannel client = (SocketChannel) key.channel();
+        if(client.isOpen()) {
+            String text = "GREMOVE$" + grpName;
+            ByteBuffer buf = ByteBuffer.wrap(text.getBytes());
+            try {
+                client.write(buf);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            buf.clear();
+
+            sendInfo(key, "You have been removed from the group "+ grpName);
+        }
+    }
+
+    private void sendGDELETE(SelectionKey key, String grpName){
+        SocketChannel client = (SocketChannel) key.channel();
+        if(client.isOpen()) {
+            String text = "GDELETE$" + grpName;
+            ByteBuffer buf = ByteBuffer.wrap(text.getBytes());
+            try {
+                client.write(buf);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            buf.clear();
+
+            sendInfo(key, "The group "+ grpName+ " has been deleted");
+        }
+    }
+
+    private void sendGrpMsg(String sender, String grpName, String msg){
+        for(SelectionKey memberKey: gd.getKeys(grpName)){
             SocketChannel client = (SocketChannel) memberKey.channel();
             if(client.isOpen()) {
                 String msgText = "GMSG$" + grpName + "$" + sender + "$" + msg;
@@ -280,11 +281,10 @@ public class Server{
                 }
                 msgBuf.clear();
             }
-            //handle if the user went offline after joining a group
         }
     }
 
-    void sendMsg(String sender, SelectionKey receiverKey, String msg){
+    private void sendMsg(String sender, SelectionKey receiverKey, String msg){
         SocketChannel client = (SocketChannel) receiverKey.channel();
         if(client.isOpen()) {
             String msgText = "MSG$" + sender + "$" + msg;
@@ -298,7 +298,7 @@ public class Server{
         }
     }
 
-    void log(String log){
+    private void log(String log){
         System.out.println(log);
     }
 }
