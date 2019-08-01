@@ -10,19 +10,16 @@ import java.nio.channels.SocketChannel;
 import java.util.*;
 
 public class Server{
-    ServerSocketChannel serverSocket;
-    InetSocketAddress serverAddress;
-    HashMap<SelectionKey,String> usernames;
-    HashMap<String, SelectionKey> keyBindings;
+    private ServerSocketChannel serverSocket;
     HashMap<String, ArrayList<SelectionKey>> groups;
     HashMap<SelectionKey, ArrayList<String>> userGroups;
+    private UserDirectory ud;
 
     public Server(String hostname, int port) {
-        usernames = new HashMap<SelectionKey,String>();
-        keyBindings = new HashMap<String, SelectionKey>();
+        ud = new UserDirectory();
         groups = new HashMap<String, ArrayList<SelectionKey>>();
         userGroups = new HashMap<SelectionKey, ArrayList<String>>();
-        serverAddress = new InetSocketAddress("localhost", 12121);
+        InetSocketAddress serverAddress = new InetSocketAddress("localhost", 12121);
         try {
             serverSocket = ServerSocketChannel.open();
             serverSocket.bind(serverAddress);
@@ -53,15 +50,14 @@ public class Server{
                     client.read(buf);
                     buf.flip();
                     String msgText = new String(buf.array()).trim();
-                    if(!usernames.containsKey(currentKey)){
+                    if(!ud.keyPresent(currentKey)){
                         String[] msgParts = msgText.split("\\$");
                         if(msgParts[0].equals("LOGIN")){
-                            if(keyBindings.containsKey(msgParts[1])){
+                            if(ud.namePresent(msgParts[1])){
                                 sendInfo(currentKey,"FAIL$The name is already used. Please use another name.");
                                 client.close();
                             } else {
-                                usernames.put(currentKey, msgParts[1]);
-                                keyBindings.put(msgParts[1], currentKey);
+                                ud.put(msgParts[1], currentKey);
                                 sendInfo(currentKey,"Logged in as "+ msgParts[1]);
                                 log(msgParts[1] + " Logged in from " + client.getRemoteAddress());
                             }
@@ -81,30 +77,31 @@ public class Server{
     void handleMessage(SelectionKey key, String msgText) throws IOException{
         if(!msgText.isEmpty()){
             String[] msgParts = msgText.split("\\$");
-            String sender = usernames.get(key);
+            String sender = ud.getName(key);
             switch (msgParts[0]) {
                 case "LOGOUT":
-                    String username = usernames.get(key);
-                    usernames.remove(key);
-                    keyBindings.remove(username);
-                    for(String grp: userGroups.get(key)){
-                        ArrayList grpMembers = groups.get(grp);
-                        grpMembers.remove(key);
-                        if(grpMembers.size()==0){
-                            groups.remove(grp);
-                        } else {
-                            groups.put(grp, grpMembers);
+                    ud.deleteKey(key);
+                    if(userGroups.get(key) != null) {
+                        for (String grp : userGroups.get(key)) {
+                            ArrayList grpMembers = groups.get(grp);
+                            grpMembers.remove(key);
+                            if (grpMembers.size() == 0) {
+                                groups.remove(grp);
+                            } else {
+                                groups.put(grp, grpMembers);
+                            }
                         }
                     }
+
                     sendInfo(key, "Logged out");
                     SocketChannel client = (SocketChannel) key.channel();
-                    log(username + " logged out");
+                    log(sender + " logged out");
                     client.close();
                     break;
                 case "MSG":
                     if(msgParts.length>0) {
                         String receiver = msgParts[1];
-                        SelectionKey receiverKey = keyBindings.get(receiver);
+                        SelectionKey receiverKey = ud.getKey(receiver);
                         if (receiverKey == null) {
                             sendInfo(key, receiver + " is not online");
                         } else {
@@ -153,10 +150,10 @@ public class Server{
                         }else {
                             String members = msgParts[2];
                             for (String member : members.split(",")) {
-                                if (!keyBindings.containsKey(member)) {
+                                if (!ud.namePresent(member)) {
                                     sendInfo(key, "User " + member + " is not online");
                                 } else {
-                                    SelectionKey memberKey = keyBindings.get(member);
+                                    SelectionKey memberKey = ud.getKey(member);
                                     ArrayList grpMembers = groups.get(grpName);
                                     if (!grpMembers.contains(memberKey)) {
                                         grpMembers.add(memberKey);
@@ -185,11 +182,11 @@ public class Server{
                         String users = msgParts[2];
                         if(!groups.containsKey(grpName)){
                             sendInfo(key, "Group "+ grpName + " does not exist or has been deleted");
-                        } else if(key.equals(getGroupAdminKey(grpName)) || (users.split(",").length==1 && users.split(",")[0].equals(usernames.get(key)))){
+                        } else if(key.equals(getGroupAdminKey(grpName)) || (users.split(",").length==1 && users.split(",")[0].equals(ud.getName(key)))){
                             ArrayList<SelectionKey> grpMembers = groups.get(grpName);
                             for(String user: users.split(",")){
                                 grpMembers.remove(user);
-                                SelectionKey userKey = keyBindings.get(user);
+                                SelectionKey userKey = ud.getKey(user);
                                 ArrayList<String> userGrps = userGroups.get(userKey);
                                 userGrps.remove(grpName);
                                 userGroups.put(userKey, userGrps);
