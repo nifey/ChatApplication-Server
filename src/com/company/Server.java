@@ -13,12 +13,15 @@ public class Server{
     ServerSocketChannel serverSocket;
     InetSocketAddress serverAddress;
     HashMap<SelectionKey,String> usernames;
-    TreeMap<String, SelectionKey> keyBindings;
+    HashMap<String, SelectionKey> keyBindings;
     HashMap<String, ArrayList<SelectionKey>> groups;
+    HashMap<SelectionKey, ArrayList<String>> userGroups;
+
     public Server(String hostname, int port) {
         usernames = new HashMap<SelectionKey,String>();
-        keyBindings = new TreeMap<String, SelectionKey>();
+        keyBindings = new HashMap<String, SelectionKey>();
         groups = new HashMap<String, ArrayList<SelectionKey>>();
+        userGroups = new HashMap<SelectionKey, ArrayList<String>>();
         serverAddress = new InetSocketAddress("localhost", 12121);
         try {
             serverSocket = ServerSocketChannel.open();
@@ -84,75 +87,148 @@ public class Server{
                     String username = usernames.get(key);
                     usernames.remove(key);
                     keyBindings.remove(username);
+                    for(String grp: userGroups.get(key)){
+                        ArrayList grpMembers = groups.get(grp);
+                        grpMembers.remove(key);
+                        if(grpMembers.size()==0){
+                            groups.remove(grp);
+                        } else {
+                            groups.put(grp, grpMembers);
+                        }
+                    }
                     sendInfo(key, "Logged out");
                     SocketChannel client = (SocketChannel) key.channel();
                     log(username + " logged out");
                     client.close();
                     break;
                 case "MSG":
-                    String receiver = msgParts[1];
-                    SelectionKey receiverKey = keyBindings.get(receiver);
-                    if(receiverKey == null){
-                        sendInfo(key, receiver + " is not online");
-                    } else {
-                        if(msgParts.length>2) {
-                            sendMsg(sender, receiverKey, msgParts[2]);
-                            log(sender + " -> " + receiver + ": " + msgText);
+                    if(msgParts.length>0) {
+                        String receiver = msgParts[1];
+                        SelectionKey receiverKey = keyBindings.get(receiver);
+                        if (receiverKey == null) {
+                            sendInfo(key, receiver + " is not online");
+                        } else {
+                            if (msgParts.length > 2) {
+                                sendMsg(sender, receiverKey, msgParts[2]);
+                                log(sender + " -> " + receiver + ": " + msgText);
+                            }
                         }
+                    } else {
+                        sendInfo(key, "Invalid command format");
                     }
                     break;
                 case "GCREATE":
                     //Creates a group and adds the sender in the group
                     if(msgParts.length>1){
                         String grpName = msgParts[1];
-                        if (grpName.isEmpty()){
-                            sendInfo(key,"Group name cannot be empty");
-                        } else if(groups.containsKey(grpName)){
+                        if(groups.containsKey(grpName)){
                             sendInfo(key,"Group name already in use. Please select a different name");
                         } else {
                             ArrayList<SelectionKey> memberKeys = new ArrayList<SelectionKey>();
                             memberKeys.add(key);
                             groups.put(grpName, memberKeys);
+                            if(userGroups.containsKey(key)) {
+                                ArrayList<String> grps = userGroups.get(key);
+                                grps.add(grpName);
+                                userGroups.put(key, grps);
+                            } else {
+                                ArrayList<String> grps = new ArrayList<String>();
+                                grps.add(grpName);
+                                userGroups.put(key, grps);
+                            }
                             sendInfo(key, "Group "+grpName+" has been created");
                         }
+                    } else {
+                        sendInfo(key, "Invalid command format");
                     }
                     break;
                 case "GADD":
                     //Checks if the sender is admin and the user is online and adds in the group
                     if(msgParts.length>2){
                         String grpName = msgParts[1];
-                        if(!key.equals(getGroupAdminKey(grpName))){
+                        if(grpName.isEmpty() || !groups.containsKey(grpName)){
+                            sendInfo(key, "Group " + grpName + " not found");
+                        } else if(!key.equals(getGroupAdminKey(grpName))){
                             sendInfo(key, "Only Group Admin can add users");
                         }else {
                             String members = msgParts[2];
-                            if (grpName.isEmpty() || !groups.containsKey(grpName)) {
-                                sendInfo(key, "Group " + grpName + " not found");
-                            } else {
-                                for (String member : members.split(",")) {
-                                    if (!keyBindings.containsKey(member)) {
-                                        sendInfo(key, "User " + member + " is not online");
+                            for (String member : members.split(",")) {
+                                if (!keyBindings.containsKey(member)) {
+                                    sendInfo(key, "User " + member + " is not online");
+                                } else {
+                                    SelectionKey memberKey = keyBindings.get(member);
+                                    ArrayList grpMembers = groups.get(grpName);
+                                    if (!grpMembers.contains(memberKey)) {
+                                        grpMembers.add(memberKey);
+                                        groups.put(grpName, grpMembers);
+
+                                        ArrayList userGrps = userGroups.get(key);
+                                        userGrps.add(grpName);
+                                        userGroups.put(key, userGrps);
+                                        sendInfo(key, "User " + member + " is added to the group " + grpName);
                                     } else {
-                                        SelectionKey memberKey = keyBindings.get(member);
-                                        ArrayList grpMembers = groups.get(grpName);
-                                        if (!grpMembers.contains(memberKey)) {
-                                            grpMembers.add(memberKey);
-                                            groups.put(grpName, grpMembers);
-                                            sendInfo(key, "User " + member + " is added to the group " + grpName);
-                                        } else {
-                                            sendInfo(key, "User " + member + " is already in the group " + grpName);
-                                        }
+                                        sendInfo(key, "User " + member + " is already in the group " + grpName);
                                     }
                                 }
                             }
+
                         }
+                    } else {
+                        sendInfo(key, "Invalid command format");
                     }
                     break;
                 case "GREMOVE":
                     //Checks if the user is admin or if the user wants to remove himself from a group and removes the user
                     //also delete the group if no one is in the group
+                    if(msgParts.length>2){
+                        String grpName = msgParts[1];
+                        String users = msgParts[2];
+                        if(!groups.containsKey(grpName)){
+                            sendInfo(key, "Group "+ grpName + " does not exist or has been deleted");
+                        } else if(key.equals(getGroupAdminKey(grpName)) || (users.split(",").length==1 && users.split(",")[0].equals(usernames.get(key)))){
+                            ArrayList<SelectionKey> grpMembers = groups.get(grpName);
+                            for(String user: users.split(",")){
+                                grpMembers.remove(user);
+                                SelectionKey userKey = keyBindings.get(user);
+                                ArrayList<String> userGrps = userGroups.get(userKey);
+                                userGrps.remove(grpName);
+                                userGroups.put(userKey, userGrps);
+                                sendInfo(key, "User "+ user + " has been removed");
+                            }
+                            if(grpMembers.size()==0){
+                                groups.remove(grpName);
+                                System.out.println("AAA");
+                            } else {
+                                groups.put(grpName, grpMembers);
+                                System.out.println("BBB");
+                            }
+                        } else {
+                            sendInfo(key, "You are not permitted to remove users from this group");
+                        }
+                    } else {
+                        sendInfo(key, "Invalid command format");
+                    }
                     break;
                 case "GDELETE":
                     //Checks if user is admin and deletes the group
+                    if(msgParts.length>1){
+                        String grpName = msgParts[1];
+                        if(!groups.containsKey(grpName)){
+                            sendInfo(key, "Group "+ grpName + " does not exist or has been deleted");
+                        } else if(key.equals(getGroupAdminKey(grpName))){
+                            ArrayList<SelectionKey> grpMembers = groups.get(grpName);
+                            for(SelectionKey memberKey: grpMembers){
+                                ArrayList userGrps = userGroups.get(memberKey);
+                                userGrps.remove(grpName);
+                                userGroups.put(memberKey, userGrps);
+                            }
+                            groups.remove(grpName);
+                        } else {
+                            sendInfo(key, "You are not permitted to delete this group");
+                        }
+                    } else {
+                        sendInfo(key, "Invalid command format");
+                    }
                     break;
                 case "GMSG":
                     //Check if the group exists and also if the sender is a part of the group and Sends a group message
@@ -161,10 +237,15 @@ public class Server{
                         String msg = msgParts[2];
                         if(!groups.containsKey(grpName)){
                             sendInfo(key, "Group "+ grpName + " does not exist or has been deleted");
-                        } else {
+                        } else if (userGroups.get(key)!=null && userGroups.get(key).contains(grpName)) {
+                            //TODO
                             sendGrpMsg(sender, grpName, msg);
+                        } else {
+                            sendInfo(key, "You are not a member of the group "+ grpName);
                         }
                         log(sender + " => " + grpName + ": " + msgText);
+                    } else {
+                        sendInfo(key, "Invalid command format");
                     }
                     break;
             }
