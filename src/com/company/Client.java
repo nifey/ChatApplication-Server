@@ -27,14 +27,22 @@ class ReaderThread extends Thread{
             byte[] msgBytes =  new byte[readBuf.remaining()];
             readBuf.get(msgBytes);
             String msgText = new String(msgBytes);
-            System.out.println("##"+msgText);
             String[] msgParts = msgText.split("\\$");
             switch (msgParts[0]){
                 case "MSG":
-                    displayMessage(msgParts[1],msgParts[2]);
+                    if(msgParts.length>2) {
+                        displayMessage(msgParts[1], msgParts[2]);
+                    }
                     break;
                 case "INFO":
-                    displayInfo(msgParts[1]);
+                    if(msgParts.length>1) {
+                        displayInfo(msgParts[1]);
+                    }
+                    break;
+                case "GMSG":
+                    if(msgParts.length>3){
+                        displayGroupMessage(msgParts[1],msgParts[2],msgParts[3]);
+                    }
                     break;
             }
         }
@@ -49,8 +57,12 @@ class ReaderThread extends Thread{
         running = false;
     }
 
-    void displayMessage(String username, String msg){
-        System.out.println(username +  " : " + msg);
+    void displayMessage(String sender, String msg){
+        System.out.println(sender +  " : " + msg);
+    }
+
+    void displayGroupMessage(String grpName, String sender, String msg){
+        System.out.println(grpName + " => " + sender + " : " + msg);
     }
 
     void displayInfo(String info){
