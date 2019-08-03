@@ -12,30 +12,30 @@ public class UserDirectory {
         keyToName = new HashMap<SelectionKey, String>();
     }
 
-    public Boolean namePresent(String name){
+    public synchronized Boolean namePresent(String name){
         return nameToKey.containsKey(name);
     }
 
-    public Boolean keyPresent(SelectionKey key){
+    public synchronized Boolean keyPresent(SelectionKey key){
         return keyToName.containsKey(key);
     }
 
-    public String getName(SelectionKey key) {
+    public synchronized String getName(SelectionKey key) {
         return keyToName.get(key);
     }
 
-    public SelectionKey getKey(String name) {
+    public synchronized SelectionKey getKey(String name) {
         return nameToKey.get(name);
     }
 
-    public void put(String name, SelectionKey key){
+    public synchronized void put(String name, SelectionKey key){
         if(!nameToKey.containsKey(name) && !keyToName.containsKey(key)){
             nameToKey.put(name, key);
             keyToName.put(key, name);
         }
     }
 
-    public void deleteKey(SelectionKey key){
+    public synchronized void deleteKey(SelectionKey key){
         if(keyToName.containsKey(key)){
             String name = keyToName.get(key);
             keyToName.remove(key);
@@ -43,7 +43,7 @@ public class UserDirectory {
         }
     }
 
-    public void deleteName(String name){
+    public synchronized void deleteName(String name){
         if(nameToKey.containsKey(name)){
             SelectionKey key = nameToKey.get(name);
             keyToName.remove(key);
