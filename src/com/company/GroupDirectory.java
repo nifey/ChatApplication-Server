@@ -20,6 +20,15 @@ public class GroupDirectory{
         groupnameToKeys.get(groupname).add(key);
     }
 
+    public synchronized String getGroups(SelectionKey key){
+        if(!keyToGroupnames.containsKey(key)){
+            return "";
+        }
+        ArrayList<String> groupList = keyToGroupnames.get(key);
+        java.util.Collections.sort(groupList);
+        return String.join(",",groupList);
+    }
+
     public synchronized ArrayList<String> getGroupnames(SelectionKey key) {
         return keyToGroupnames.get(key);
     }

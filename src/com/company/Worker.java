@@ -31,7 +31,6 @@ public class Worker implements Runnable {
                 if(msgParts[0].equals("LOGIN")){
                     if (server.ud.namePresent(msgParts[1])) {
                         sendInfo(key, "FAIL$The name is already used. Please use another name.");
-                        client.close();
                     } else {
                         server.ud.put(msgParts[1], key);
                         sendInfo(key, "Logged in as " + msgParts[1]);
@@ -39,7 +38,6 @@ public class Worker implements Runnable {
                     }
                 } else {
                     log(client.getRemoteAddress() + " Failed to login\nMessage received from client: " + msgText);
-                    client.close();
                 }
                 return;
             }
@@ -49,7 +47,6 @@ public class Worker implements Runnable {
                     server.ud.deleteKey(key);
                     server.gd.removeByKey(key);
 
-                    sendInfo(key, "Logged out");
                     log(sender + " logged out");
                     client.close();
                     break;
@@ -168,6 +165,12 @@ public class Worker implements Runnable {
                         sendInfo(key, "Invalid command format");
                     }
                     break;
+                case "USERS":
+                    sendUSERS(key, server.ud.getOnlineUsers());
+                    break;
+                case "GROUPS":
+                    sendGROUPS(key, server.gd.getGroups(key));
+                    break;
             }
         }
     }
@@ -179,6 +182,14 @@ public class Worker implements Runnable {
     private void sendGADD(SelectionKey key, String grpName){
         server.send(key,"GADD$" + grpName+"##");
         server.send(key, "INFO$You have been added to the group "+ grpName +"##");
+    }
+
+    private void sendUSERS(SelectionKey key, String users){
+        server.send(key,"USERS$" + users+"##");
+    }
+
+    private void sendGROUPS(SelectionKey key, String grps){
+        server.send(key,"GROUPS$" + grps+"##");
     }
 
     private void sendGREMOVE(SelectionKey key, String grpName){

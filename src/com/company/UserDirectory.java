@@ -1,7 +1,10 @@
 package com.company;
 
 import java.nio.channels.SelectionKey;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Set;
 
 public class UserDirectory {
     private HashMap<String, SelectionKey> nameToKey;
@@ -10,6 +13,16 @@ public class UserDirectory {
     public UserDirectory(){
         nameToKey = new HashMap<String, SelectionKey>();
         keyToName = new HashMap<SelectionKey, String>();
+    }
+
+    public synchronized String getOnlineUsers(){
+        Iterator<String> iter = nameToKey.keySet().iterator();
+        ArrayList<String> userList = new ArrayList<String>();
+        while(iter.hasNext()){
+            userList.add(iter.next());
+        }
+        java.util.Collections.sort(userList);
+        return String.join(",",userList);
     }
 
     public synchronized Boolean namePresent(String name){
