@@ -43,7 +43,13 @@ public class Server implements Runnable{
                     while(channels.hasNext()){
                         SocketChannel socketChannel = (SocketChannel) channels.next();
                         SelectionKey key = socketChannel.keyFor(selector);
-                        key.interestOps(SelectionKey.OP_WRITE);
+                        if(key!=null) {
+                            key.interestOps(SelectionKey.OP_WRITE);
+                        } else {
+                            ud.deleteKey(key);
+                            gd.removeByKey(key);
+                            socketChannel.close();
+                        }
                     }
                     channelsToWrite.clear();
                 }
@@ -135,15 +141,15 @@ public class Server implements Runnable{
         String read = new String(bytes);
         System.out.println("DEBUG: Server: Read :"+read+" of length "+read.length());
         synchronized (unprocessedTasks) {
-            if(!read.endsWith("##")){
-                int in = read.lastIndexOf("##");
-                if(in!=-1){
-                    read = read.substring(0, in);
-                    for (String taskStr : read.split("##")) {
-                        unprocessedTasks.add(new Task(key, taskStr));
-                        unprocessedTasks.notify();
-                        System.out.println("DEBUG: Server: Task Added "+ taskStr);
-                    }
+            int in = read.lastIndexOf("##");
+            if (in != -1) {
+                read = read.substring(0, in);
+                System.out.println("DEBUG: Server: readinside " + read);
+                for (String taskStr : read.split("##")) {
+                    System.out.println("DEBUG: Server: taskstr: " + taskStr);
+                    unprocessedTasks.add(new Task(key, taskStr));
+                    unprocessedTasks.notify();
+                    System.out.println("DEBUG: Server: Task Added " + taskStr);
                 }
             }
         }

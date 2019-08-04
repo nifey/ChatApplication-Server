@@ -3,6 +3,7 @@ package com.company;
 import java.io.IOException;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
+import java.util.Iterator;
 
 public class Worker implements Runnable {
     private Server server;
@@ -30,9 +31,10 @@ public class Worker implements Runnable {
             if(!server.ud.keyPresent(key)){
                 if(msgParts[0].equals("LOGIN")){
                     if (server.ud.namePresent(msgParts[1])) {
-                        sendInfo(key, "FAIL$The name is already used. Please use another name.");
+                        sendInfo(key, "The name is already used. Please use another name.");
                     } else {
                         server.ud.put(msgParts[1], key);
+                        broadcastUserList();
                         sendInfo(key, "Logged in as " + msgParts[1]);
                         log(msgParts[1] + " Logged in from " + client.getRemoteAddress());
                     }
@@ -46,6 +48,7 @@ public class Worker implements Runnable {
                 case "LOGOUT":
                     server.ud.deleteKey(key);
                     server.gd.removeByKey(key);
+                    broadcastUserList();
 
                     log(sender + " logged out");
                     client.close();
@@ -58,6 +61,9 @@ public class Worker implements Runnable {
                             sendInfo(key, receiver + " is not online");
                         } else {
                             sendMsg(sender, receiverKey, msgParts[2]);
+                            if(receiverKey!=key) {
+                                sendSelfMsg(receiver, sender, key, msgParts[2]);
+                            }
                             log(sender + " -> " + receiver + ": " + msgText);
                         }
                     } else {
@@ -72,6 +78,7 @@ public class Worker implements Runnable {
                             sendInfo(key,"Group name already in use. Please select a different name");
                         } else {
                             server.gd.put(key, grpName);
+                            sendGROUPS(key, server.gd.getGroups(key));
                             sendInfo(key, "Group "+grpName+" has been created");
                         }
                     } else {
@@ -95,8 +102,9 @@ public class Worker implements Runnable {
                                     SelectionKey memberKey = server.ud.getKey(member);
                                     if (!server.gd.isInGroup(memberKey, grpName)) {
                                         server.gd.put(memberKey, grpName);
-                                        sendGADD(memberKey, grpName);
                                         sendInfo(key, "User " + member + " is added to the group " + grpName);
+                                        sendInfo(memberKey, "You have been added to the group " + grpName);
+                                        sendGROUPS(memberKey, server.gd.getGroups(memberKey));
                                     } else {
                                         sendInfo(key, "User " + member + " is already in the group " + grpName);
                                     }
@@ -120,8 +128,9 @@ public class Worker implements Runnable {
                             for(String user: users.split(",")){
                                 SelectionKey userKey = server.ud.getKey(user);
                                 server.gd.removeFromGroup(userKey, grpName);
-                                sendGREMOVE(userKey, grpName);
                                 sendInfo(key, "User "+ user + " has been removed");
+                                sendInfo(userKey, "You have been removed from the group "+ grpName);
+                                sendGROUPS(userKey,server.gd.getGroups(userKey));
                             }
                         } else {
                             sendInfo(key, "You are not permitted to remove users from this group");
@@ -138,9 +147,9 @@ public class Worker implements Runnable {
                             sendInfo(key, "Group "+ grpName + " does not exist or has been deleted");
                         } else if(key.equals(server.gd.getGroupAdminKey(grpName))){
                             for(SelectionKey userKey: server.gd.removeByGroupname(grpName)){
-                                sendGDELETE(userKey, grpName);
+                                sendInfo(userKey, "The group "+ grpName+ " has been deleted");
+                                sendGROUPS(userKey, server.gd.getGroups(userKey));
                             }
-                            sendInfo(key, "The group "+grpName + " has been deleted");
                         } else {
                             sendInfo(key, "You are not permitted to delete this group");
                         }
@@ -175,13 +184,17 @@ public class Worker implements Runnable {
         }
     }
 
-    private void sendInfo(SelectionKey key, String info){
-        server.send(key,"INFO$" + info + "##");
+    private void broadcastUserList(){
+        String onlineUsers = server.ud.getOnlineUsers();
+        Iterator<SelectionKey> iter = server.ud.getAllKey().iterator();
+        while(iter.hasNext()){
+            SelectionKey currentKey = iter.next();
+            sendUSERS(currentKey, onlineUsers);
+        }
     }
 
-    private void sendGADD(SelectionKey key, String grpName){
-        server.send(key,"GADD$" + grpName+"##");
-        server.send(key, "INFO$You have been added to the group "+ grpName +"##");
+    private void sendInfo(SelectionKey key, String info){
+        server.send(key,"INFO$" + info + "##");
     }
 
     private void sendUSERS(SelectionKey key, String users){
@@ -190,16 +203,6 @@ public class Worker implements Runnable {
 
     private void sendGROUPS(SelectionKey key, String grps){
         server.send(key,"GROUPS$" + grps+"##");
-    }
-
-    private void sendGREMOVE(SelectionKey key, String grpName){
-        server.send(key, "GREMOVE$" + grpName +"##");
-        server.send(key, "INFO$You have been removed from the group "+ grpName+"##");
-    }
-
-    private void sendGDELETE(SelectionKey key, String grpName){
-        server.send(key,  "GDELETE$" + grpName +"##");
-        server.send(key, "INFO$The group "+ grpName+ " has been deleted##");
     }
 
     private void sendGrpMsg(String sender, String grpName, String msg){
@@ -211,8 +214,12 @@ public class Worker implements Runnable {
     private void sendMsg(String sender, SelectionKey receiverKey, String msg){
         server.send(receiverKey, "MSG$" + sender + "$" + msg + "##");
     }
+
+    private void sendSelfMsg(String receiver, String sender, SelectionKey receiverKey, String msg){
+        server.send(receiverKey, "SELF$" + receiver + "$" + sender + "$" + msg + "##");
+    }
     
-    private void log(String log){
+    public void log(String log){
         System.out.println("DEBUG: Worker: "+log);
     }
 }

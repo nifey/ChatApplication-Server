@@ -41,6 +41,10 @@ public class UserDirectory {
         return nameToKey.get(name);
     }
 
+    public synchronized Set<SelectionKey> getAllKey(){
+        return keyToName.keySet();
+    }
+
     public synchronized void put(String name, SelectionKey key){
         if(!nameToKey.containsKey(name) && !keyToName.containsKey(key)){
             nameToKey.put(name, key);
