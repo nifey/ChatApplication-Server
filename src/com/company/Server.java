@@ -43,7 +43,7 @@ public class Server implements Runnable{
                     while(channels.hasNext()){
                         SocketChannel socketChannel = (SocketChannel) channels.next();
                         SelectionKey key = socketChannel.keyFor(selector);
-                        if(key!=null) {
+                        if(key!=null && key.isValid()) {
                             key.interestOps(SelectionKey.OP_WRITE);
                         } else {
                             ud.deleteKey(key);
