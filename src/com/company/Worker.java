@@ -181,8 +181,30 @@ public class Worker implements Runnable {
                     sendGROUPS(key, server.gd.getGroups(key));
                     break;
                 case "FILE":
-                    if(msgParts.length>4){
-
+                    if(msgParts.length>4) {
+                        String receiver = msgParts[1];
+                        SelectionKey receiverKey = server.ud.getKey(receiver);
+                        if (receiverKey == null) {
+                            sendInfo(key, receiver + " is not online");
+                        } else {
+                            sendFile(receiverKey, sender, msgParts[2], msgParts[3], msgParts[4]);
+                            log(sender + " -> " + receiver + ": " + msgText);
+                        }
+                    } else {
+                        sendInfo(key, "Invalid command format");
+                    }
+                    break;
+                case "GFILE":
+                    if(msgParts.length>4) {
+                        String grpName = msgParts[1];
+                        if(server.gd.groupExists(grpName)){
+                            sendGFile(key,grpName, sender, msgParts[2], msgParts[3], msgParts[4]);
+                            log(sender + " ==> " + grpName + ": " + msgText);
+                        } else {
+                            sendInfo(key, grpName + " does not exist or has been deleted");
+                        }
+                    } else {
+                        sendInfo(key, "Invalid command format");
                     }
                     break;
             }
@@ -208,6 +230,18 @@ public class Worker implements Runnable {
 
     private void sendGROUPS(SelectionKey key, String grps){
         server.send(key,"GROUPS$" + grps+"##");
+    }
+
+    private void sendFile(SelectionKey key, String sender, String filename, String bytes, String keyString){
+        server.send(key, "FILE$" + sender + "$" + filename + "$" + bytes + "$" + keyString + "##");
+    }
+
+    private void sendGFile(SelectionKey key,String grpName, String sender, String filename, String bytes, String keyString){
+        for(SelectionKey memberKey: server.gd.getKeys(grpName)){
+            if(memberKey != key) {
+                server.send(memberKey, "GFILE$" + grpName + "$" + sender + "$" + filename + "$" + bytes + "$" + keyString + "##");
+            }
+        }
     }
 
     private void sendGrpMsg(String sender, String grpName, String msg){
