@@ -20,7 +20,7 @@ public class FileServer implements Runnable {
     private HashMap pendingFile = new HashMap();
     private HashMap pendingMessages = new HashMap();
     private List channelsToWrite = new ArrayList<SocketChannel>();
-    private HashMap<String, String> fileMap = new HashMap<String, String>();
+    private List fileList = new ArrayList<String>();
     private String fileDirPath = "/home/nihaal/filedir/";
 
     public FileServer(String hostname, int port){
@@ -45,7 +45,7 @@ public class FileServer implements Runnable {
                     while(channels.hasNext()){
                         SocketChannel socketChannel = (SocketChannel) channels.next();
                         SelectionKey key = socketChannel.keyFor(selector);
-                        if(key!=null) {
+                        if(key!=null && key.isValid()) {
                             key.interestOps(SelectionKey.OP_WRITE);
                         } else {
                             socketChannel.close();
@@ -122,16 +122,16 @@ public class FileServer implements Runnable {
         } else {
             synchronized (pendingMessages){
                 try {
-                    List msgList = pendingMessages.get(socketChannel);
+                    List msgList = (List) pendingMessages.get(socketChannel);
                     while (!msgList.isEmpty()) {
-                        String msg = msgList.get(0);
+                        String msg = (String)msgList.get(0);
                         msgList.remove(0);
-                        ByteBuffer buf = ByteBuffer.wrap(msg);
-                        while (buf.remaining > 0) {
+                        ByteBuffer buf = ByteBuffer.wrap(msg.getBytes());
+                        while (buf.remaining() > 0) {
                             socketChannel.write(buf);
                         }
-                        socketChannel.close();
                     }
+                    socketChannel.close();
                 }catch (Exception e){
                     e.printStackTrace();
                 }
@@ -176,28 +176,36 @@ public class FileServer implements Runnable {
             System.out.println("DEBUG: Server: readinside " + read);
             String [] msgParts = read.split("\\$");
             if(msgParts[0].equals("RECEIVE")){
-                if(msgParts.length>2) {
-                    String filename = msgParts[1];
-                    int numberOfBytes = Integer.parseInt(msgParts[2]);
-                    String keyStr =  generateString(10);
-                    while(fileMap.containsKey(keyStr)){
-                        keyStr = generateString(10);
+                if(msgParts.length>1) {
+                    int numberOfBytes = -1;
+                    try {
+                        numberOfBytes = Integer.parseInt(msgParts[1]);
+                    }catch (NumberFormatException e){
+                        e.printStackTrace();
                     }
-                    System.out.println("Generated key string "+keyStr+" for the file "+filename+" of "+numberOfBytes + " bytes");
-                    receiveFile(key, filename, numberOfBytes, keyStr);
+                    if(numberOfBytes>0) {
+                        String keyStr = generateString(10);
+                        while (fileList.contains(keyStr)) {
+                            keyStr = generateString(10);
+                        }
+                        System.out.println("Generated key string " + keyStr + " for the file of " + numberOfBytes + " bytes");
+                        receiveFile(key, numberOfBytes, keyStr);
+                    }
                 }
             } else if (msgParts[0].equals("SEND")){
-                if(msgParts.length>1 && fileMap.containsKey(msgParts[1])){
-                    sendFile(key, msgParts[1]);
+                if(msgParts.length>1){
+                    if(fileList.contains(msgParts[1])) {
+                        sendFile(key, msgParts[1]);
+                    }
                 }
             }
         }
     }
 
-    private void receiveFile(SelectionKey key, String filename, int numberOfBytes, String keyString){
+    private void receiveFile(SelectionKey key, int numberOfBytes, String keyString){
         SocketChannel socketChannel = (SocketChannel) key.channel();
         try {
-            FileChannel fc = new FileOutputStream(new File(fileDirPath+"/"+filename)).getChannel();
+            FileChannel fc = new FileOutputStream(new File(fileDirPath+"/"+keyString)).getChannel();
             ByteBuffer buf = ByteBuffer.allocate(512);
             int numRead = 0;
             while(numRead < numberOfBytes){
@@ -209,10 +217,10 @@ public class FileServer implements Runnable {
                 buf.clear();
                 numRead = numRead + bytes;
             }
-            socketChannel.close();
             fc.close();
-            fileMap.put(keyString, filename);
-            System.out.println("Received file "+filename);
+            fileList.add(keyString);
+            System.out.println("Received file with keyString"+keyString);
+            sendMessage(key, "RECEIVED$"+keyString+"$"+ numberOfBytes+"##");
         }catch (Exception e ){
             e.printStackTrace();
         }
@@ -225,7 +233,7 @@ public class FileServer implements Runnable {
                 channelsToWrite.add(socketChannel);
             }
             synchronized (pendingFile) {
-                pendingFile.put(socketChannel, fileMap.get(keyString));
+                pendingFile.put(socketChannel, keyString);
                 System.out.println("DEBUG: Server: Filename added to pending data");
             }
         }
@@ -239,9 +247,9 @@ public class FileServer implements Runnable {
                 channelsToWrite.add(socketChannel);
             }
             synchronized (pendingMessages){
-                List messageList = pendingMessages.get(socketChannel);
+                List messageList = (List)pendingMessages.get(socketChannel);
                 if(messageList == null){
-                    List messageList = new ArrayList<String>();
+                    messageList = new ArrayList<String>();
                     pendingMessages.put(socketChannel, messageList);
                 }
                 messageList.add(msg);
