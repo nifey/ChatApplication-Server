@@ -17,7 +17,8 @@ public class FileServer implements Runnable {
     private ServerSocketChannel serverSocket;
     private Selector selector;
     private ByteBuffer readBuffer = ByteBuffer.allocate(4092);
-    private HashMap pendingData = new HashMap();
+    private HashMap pendingFile = new HashMap();
+    private HashMap pendingMessages = new HashMap();
     private List channelsToWrite = new ArrayList<SocketChannel>();
     private HashMap<String, String> fileMap = new HashMap<String, String>();
     private String fileDirPath = "/home/nihaal/filedir/";
@@ -85,34 +86,55 @@ public class FileServer implements Runnable {
     private void write(SelectionKey key){
         SocketChannel socketChannel = (SocketChannel) key.channel();
         String filename;
-        synchronized (pendingData) {
-            filename = (String) this.pendingData.get(socketChannel);
-            this.pendingData.remove(socketChannel);
+        synchronized (pendingFile) {
+            filename = (String) this.pendingFile.get(socketChannel);
+            if(filename != null) {
+                this.pendingFile.remove(socketChannel);
+            }
         }
-        Path path = Paths.get(fileDirPath +"/"+filename);
-        if(Files.exists(path,new LinkOption[]{ LinkOption.NOFOLLOW_LINKS})) {
-            try {
-                System.out.println("Writing file");
-                FileChannel fc = new FileInputStream(new File(fileDirPath+ "/"+filename)).getChannel();
-                ByteBuffer buf = ByteBuffer.allocate(512);
-                int numRead = fc.read(buf);
-                while(numRead != -1){
-                    int bytesRem;
-                    buf.flip();
-                    do {
-                        System.out.println("in");
-                        socketChannel.write(buf);
-                        bytesRem = buf.remaining();
-                    }while (bytesRem>0);
-                    buf.clear();
-                    numRead = fc.read(buf);
-                    System.out.println("writing...");
+        if(filename != null) {
+            Path path = Paths.get(fileDirPath + "/" + filename);
+            if (Files.exists(path, new LinkOption[]{LinkOption.NOFOLLOW_LINKS})) {
+                try {
+                    System.out.println("Writing file");
+                    FileChannel fc = new FileInputStream(new File(fileDirPath + "/" + filename)).getChannel();
+                    ByteBuffer buf = ByteBuffer.allocate(512);
+                    int numRead = fc.read(buf);
+                    while (numRead != -1) {
+                        int bytesRem;
+                        buf.flip();
+                        do {
+                            System.out.println("in");
+                            socketChannel.write(buf);
+                            bytesRem = buf.remaining();
+                        } while (bytesRem > 0);
+                        buf.clear();
+                        numRead = fc.read(buf);
+                        System.out.println("writing...");
+                    }
+                    System.out.println("finished writing...");
+                    socketChannel.close();
+                    fc.close();
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
-                System.out.println("finished writing...");
-                socketChannel.close();
-                fc.close();
-            }catch (Exception e ){
-                e.printStackTrace();
+            }
+        } else {
+            synchronized (pendingMessages){
+                try {
+                    List msgList = pendingMessages.get(socketChannel);
+                    while (!msgList.isEmpty()) {
+                        String msg = msgList.get(0);
+                        msgList.remove(0);
+                        ByteBuffer buf = ByteBuffer.wrap(msg);
+                        while (buf.remaining > 0) {
+                            socketChannel.write(buf);
+                        }
+                        socketChannel.close();
+                    }
+                }catch (Exception e){
+                    e.printStackTrace();
+                }
             }
         }
     }
@@ -199,10 +221,30 @@ public class FileServer implements Runnable {
     void sendFile(SelectionKey key, String keyString){
         SocketChannel socketChannel = (SocketChannel) key.channel();
         synchronized (channelsToWrite) {
-            channelsToWrite.add(socketChannel);
-            synchronized (pendingData) {
-                pendingData.put(socketChannel, fileMap.get(keyString));
+            if(!channelsToWrite.contains(socketChannel)) {
+                channelsToWrite.add(socketChannel);
+            }
+            synchronized (pendingFile) {
+                pendingFile.put(socketChannel, fileMap.get(keyString));
                 System.out.println("DEBUG: Server: Filename added to pending data");
+            }
+        }
+        selector.wakeup();
+    }
+
+    void sendMessage(SelectionKey key, String msg){
+        SocketChannel socketChannel = (SocketChannel) key.channel();
+        synchronized (channelsToWrite) {
+            if(!channelsToWrite.contains(socketChannel)){
+                channelsToWrite.add(socketChannel);
+            }
+            synchronized (pendingMessages){
+                List messageList = pendingMessages.get(socketChannel);
+                if(messageList == null){
+                    List messageList = new ArrayList<String>();
+                    pendingMessages.put(socketChannel, messageList);
+                }
+                messageList.add(msg);
             }
         }
         selector.wakeup();

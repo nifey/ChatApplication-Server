@@ -180,6 +180,11 @@ public class Worker implements Runnable {
                 case "GROUPS":
                     sendGROUPS(key, server.gd.getGroups(key));
                     break;
+                case "FILE":
+                    if(msgParts.length>4){
+
+                    }
+                    break;
             }
         }
     }
