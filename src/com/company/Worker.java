@@ -4,18 +4,21 @@ import java.io.IOException;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
 import java.util.Iterator;
+import java.util.logging.Logger;
 
 public class Worker implements Runnable {
+    private static final Logger logger = Logger.getLogger(Worker.class.getName());
+
     private Server server;
     public Worker(Server server){
         this.server = server;
     }
 
     public void run(){
-        System.out.println("DEBUG: Worker: Started");
+        log("Started");
         while(true) {
             Task t = this.server.getNextTask();
-            System.out.println("DEBUG: Worker: Got a new task: "+ t.getMsg());
+            log("Got a new task: "+ t.getMsg());
             try {
                 handleMessage(t.getKey(), t.getMsg());
             } catch (IOException e){
@@ -24,11 +27,15 @@ public class Worker implements Runnable {
         }
     }
 
+    private void log(String msg){
+        logger.info(this.getClass()+ " : "+msg);
+    }
+
     private void handleMessage(SelectionKey key, String msgText) throws IOException {
         if(!msgText.isEmpty()){
             String[] msgParts = msgText.split("\\$");
             SocketChannel client = (SocketChannel) key.channel();
-            if(!server.ud.keyPresent(key)){
+            if(!server.ud.isOnline(key)){
                 if(msgParts[0].equals("LOGIN")){
                     if (server.ud.namePresent(msgParts[1])) {
                         sendInfo(key, "The name is already used. Please use another name.");
@@ -37,6 +44,12 @@ public class Worker implements Runnable {
                         broadcastUserList();
                         sendInfo(key, "Logged in as " + msgParts[1]);
                         log(msgParts[1] + " Logged in from " + client.getRemoteAddress());
+                        if(server.hasUnsentMessages(msgParts[1])){
+                            server.sendUnsentMessages(msgParts[1]);
+                        }
+                        if(server.gd.usernameExists(msgParts[1])){
+                            sendGROUPS(key, server.gd.getGroups(msgParts[1]));
+                        }
                     }
                 } else {
                     log(client.getRemoteAddress() + " Failed to login\nMessage received from client: " + msgText);
@@ -47,24 +60,22 @@ public class Worker implements Runnable {
             switch (msgParts[0]) {
                 case "LOGOUT":
                     server.ud.deleteKey(key);
-                    server.gd.removeByKey(key);
                     broadcastUserList();
 
                     log(sender + " logged out");
-                    client.close();
                     break;
                 case "MSG":
                     if(msgParts.length>2) {
                         String receiver = msgParts[1];
                         SelectionKey receiverKey = server.ud.getKey(receiver);
                         if (receiverKey == null) {
-                            sendInfo(key, receiver + " is not online");
+                            sendInfo(key, "The username "+msgParts[1]+" is not registered");
                         } else {
                             sendMsg(sender, receiverKey, msgParts[2]);
                             if(receiverKey!=key) {
                                 sendSelfMsg(receiver, sender, key, msgParts[2]);
                             }
-                            log(sender + " -> " + receiver + ": " + msgText);
+                            log(sender + " -> " + receiver + ": " + msgParts[2]);
                         }
                     } else {
                         sendInfo(key, "Invalid command format");
@@ -77,8 +88,8 @@ public class Worker implements Runnable {
                         if(server.gd.groupExists(grpName)){
                             sendInfo(key,"Group name already in use. Please select a different name");
                         } else {
-                            server.gd.put(key, grpName);
-                            sendGROUPS(key, server.gd.getGroups(key));
+                            server.gd.put(server.ud.getName(key), grpName);
+                            sendGROUPS(key, server.gd.getGroups(server.ud.getName(key)));
                             sendInfo(key, "Group "+grpName+" has been created");
                         }
                     } else {
@@ -91,7 +102,7 @@ public class Worker implements Runnable {
                         String grpName = msgParts[1];
                         if(!server.gd.groupExists(grpName)){
                             sendInfo(key, "Group " + grpName + " not found");
-                        } else if(!key.equals(server.gd.getGroupAdminKey(grpName))){
+                        } else if(!key.equals(server.ud.getKey(server.gd.getGroupAdminUsername(grpName)))){
                             sendInfo(key, "Only Group Admin can add users");
                         }else {
                             String members = msgParts[2];
@@ -100,11 +111,11 @@ public class Worker implements Runnable {
                                     sendInfo(key, "User " + member + " is not online");
                                 } else {
                                     SelectionKey memberKey = server.ud.getKey(member);
-                                    if (!server.gd.isInGroup(memberKey, grpName)) {
-                                        server.gd.put(memberKey, grpName);
+                                    if (!server.gd.isInGroup(member, grpName)) {
+                                        server.gd.put(member, grpName);
                                         sendInfo(key, "User " + member + " is added to the group " + grpName);
                                         sendInfo(memberKey, "You have been added to the group " + grpName);
-                                        sendGROUPS(memberKey, server.gd.getGroups(memberKey));
+                                        sendGROUPS(memberKey, server.gd.getGroups(member));
                                     } else {
                                         sendInfo(key, "User " + member + " is already in the group " + grpName);
                                     }
@@ -124,13 +135,13 @@ public class Worker implements Runnable {
                         String users = msgParts[2];
                         if(!server.gd.groupExists(grpName)){
                             sendInfo(key, "Group "+ grpName + " does not exist or has been deleted");
-                        } else if(key.equals(server.gd.getGroupAdminKey(grpName)) || (users.split(",").length==1 && users.split(",")[0].equals(server.ud.getName(key)))){
+                        } else if(key.equals(server.ud.getKey(server.gd.getGroupAdminUsername(grpName))) || (users.split(",").length==1 && users.split(",")[0].equals(server.ud.getName(key)))){
                             for(String user: users.split(",")){
                                 SelectionKey userKey = server.ud.getKey(user);
-                                server.gd.removeFromGroup(userKey, grpName);
+                                server.gd.removeFromGroup(user, grpName);
                                 sendInfo(key, "User "+ user + " has been removed");
                                 sendInfo(userKey, "You have been removed from the group "+ grpName);
-                                sendGROUPS(userKey,server.gd.getGroups(userKey));
+                                sendGROUPS(userKey,server.gd.getGroups(user));
                             }
                         } else {
                             sendInfo(key, "You are not permitted to remove users from this group");
@@ -145,10 +156,11 @@ public class Worker implements Runnable {
                         String grpName = msgParts[1];
                         if(!server.gd.groupExists(grpName)){
                             sendInfo(key, "Group "+ grpName + " does not exist or has been deleted");
-                        } else if(key.equals(server.gd.getGroupAdminKey(grpName))){
-                            for(SelectionKey userKey: server.gd.removeByGroupname(grpName)){
+                        } else if(key.equals(server.ud.getKey(server.gd.getGroupAdminUsername(grpName)))){
+                            for(String user: server.gd.removeByGroupname(grpName)){
+                                SelectionKey userKey = server.ud.getKey(user);
                                 sendInfo(userKey, "The group "+ grpName+ " has been deleted");
-                                sendGROUPS(userKey, server.gd.getGroups(userKey));
+                                sendGROUPS(userKey, server.gd.getGroups(user));
                             }
                         } else {
                             sendInfo(key, "You are not permitted to delete this group");
@@ -164,31 +176,31 @@ public class Worker implements Runnable {
                         String msg = msgParts[2];
                         if(!server.gd.groupExists(grpName)){
                             sendInfo(key, "Group "+ grpName + " does not exist or has been deleted");
-                        } else if (server.gd.isInGroup(key,grpName)) {
+                        } else if (server.gd.isInGroup(server.ud.getName(key),grpName)) {
                             sendGrpMsg(sender, grpName, msg);
                         } else {
                             sendInfo(key, "You are not a member of the group "+ grpName);
                         }
-                        log(sender + " => " + grpName + ": " + msgText);
+                        log(sender + " => " + grpName + ": " + msg);
                     } else {
                         sendInfo(key, "Invalid command format");
                     }
                     break;
                 case "USERS":
-                    sendUSERS(key, server.ud.getOnlineUsers());
+                    sendUSERS(key, server.ud.getRegisteredUsers());
                     break;
                 case "GROUPS":
-                    sendGROUPS(key, server.gd.getGroups(key));
+                    sendGROUPS(key, server.gd.getGroups(server.ud.getName(key)));
                     break;
                 case "FILE":
                     if(msgParts.length>4) {
                         String receiver = msgParts[1];
                         SelectionKey receiverKey = server.ud.getKey(receiver);
                         if (receiverKey == null) {
-                            sendInfo(key, receiver + " is not online");
+                            sendInfo(key, "The username "+receiver+" is not registered");
                         } else {
                             sendFile(receiverKey, sender, msgParts[2], msgParts[3], msgParts[4]);
-                            log(sender + " -> " + receiver + ": " + msgText);
+                            log(sender + " -FILE-> " + receiver + ": " + msgParts[2]);
                         }
                     } else {
                         sendInfo(key, "Invalid command format");
@@ -199,7 +211,7 @@ public class Worker implements Runnable {
                         String grpName = msgParts[1];
                         if(server.gd.groupExists(grpName)){
                             sendGFile(key,grpName, sender, msgParts[2], msgParts[3], msgParts[4]);
-                            log(sender + " ==> " + grpName + ": " + msgText);
+                            log(sender + " =FILE=> " + grpName + ": " + msgParts[2]);
                         } else {
                             sendInfo(key, grpName + " does not exist or has been deleted");
                         }
@@ -212,8 +224,8 @@ public class Worker implements Runnable {
     }
 
     private void broadcastUserList(){
-        String onlineUsers = server.ud.getOnlineUsers();
-        Iterator<SelectionKey> iter = server.ud.getAllKey().iterator();
+        String onlineUsers = server.ud.getRegisteredUsers();
+        Iterator<SelectionKey> iter = server.ud.getAllOnlineKey().iterator();
         while(iter.hasNext()){
             SelectionKey currentKey = iter.next();
             sendUSERS(currentKey, onlineUsers);
@@ -237,7 +249,8 @@ public class Worker implements Runnable {
     }
 
     private void sendGFile(SelectionKey key,String grpName, String sender, String filename, String bytes, String keyString){
-        for(SelectionKey memberKey: server.gd.getKeys(grpName)){
+        for(String member: server.gd.getUsernames(grpName)){
+            SelectionKey memberKey = server.ud.getKey(member);
             if(memberKey != key) {
                 server.send(memberKey, "GFILE$" + grpName + "$" + sender + "$" + filename + "$" + bytes + "$" + keyString + "##");
             }
@@ -245,7 +258,8 @@ public class Worker implements Runnable {
     }
 
     private void sendGrpMsg(String sender, String grpName, String msg){
-        for(SelectionKey memberKey: server.gd.getKeys(grpName)){
+        for(String member: server.gd.getUsernames(grpName)){
+            SelectionKey memberKey = server.ud.getKey(member);
             server.send(memberKey, "GMSG$" + grpName + "$" + sender + "$" + msg + "##");
         }
     }
@@ -258,7 +272,4 @@ public class Worker implements Runnable {
         server.send(receiverKey, "SELF$" + receiver + "$" + sender + "$" + msg + "##");
     }
     
-    public void log(String log){
-        System.out.println("DEBUG: Worker: "+log);
-    }
 }

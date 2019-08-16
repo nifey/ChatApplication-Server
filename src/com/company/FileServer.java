@@ -12,8 +12,10 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.logging.Logger;
 
 public class FileServer implements Runnable {
+    private static final Logger logger = Logger.getLogger(FileServer.class.getName());
     private ServerSocketChannel serverSocket;
     private Selector selector;
     private ByteBuffer readBuffer = ByteBuffer.allocate(4092);
@@ -36,8 +38,12 @@ public class FileServer implements Runnable {
         }
     }
 
+    private void log(String msg){
+        logger.info(this.getClass()+ " : "+ msg);
+    }
+
     public void run(){
-        System.out.println("DEBUG: FileServer: Started");
+        log("Started");
         while(true){
             try {
                 synchronized (channelsToWrite){
@@ -54,7 +60,7 @@ public class FileServer implements Runnable {
                     channelsToWrite.clear();
                 }
 
-                System.out.println("DEBUG: FileServer: Selector waiting for event");
+                log("Selector waiting for event");
                 this.selector.select();
                 Iterator<SelectionKey> iter = this.selector.selectedKeys().iterator();
 
@@ -68,13 +74,11 @@ public class FileServer implements Runnable {
                         SocketChannel client = serverSocket.accept();
                         client.configureBlocking(false);
                         client.register(selector, SelectionKey.OP_READ);
-                        System.out.println("DEBUG: FileServer: Accepted connection");
+                        log("Accepted connection from "+client.getRemoteAddress());
                     } else if (currentKey.isReadable()) {
                         this.read(currentKey);
-                        System.out.println("DEBUG: FileServer: Finished reading data");
                     } else if (currentKey.isWritable()){
                         this.write(currentKey);
-                        System.out.println("DEBUG: FileServer: Finished writing data");
                     }
                 }
             } catch (Exception e){
@@ -96,7 +100,7 @@ public class FileServer implements Runnable {
             Path path = Paths.get(fileDirPath + "/" + filename);
             if (Files.exists(path, new LinkOption[]{LinkOption.NOFOLLOW_LINKS})) {
                 try {
-                    System.out.println("Writing file");
+                    log("Writing file "+ filename + " to "+ socketChannel.getRemoteAddress());
                     FileChannel fc = new FileInputStream(new File(fileDirPath + "/" + filename)).getChannel();
                     ByteBuffer buf = ByteBuffer.allocate(512);
                     int numRead = fc.read(buf);
@@ -104,15 +108,12 @@ public class FileServer implements Runnable {
                         int bytesRem;
                         buf.flip();
                         do {
-                            System.out.println("in");
                             socketChannel.write(buf);
                             bytesRem = buf.remaining();
                         } while (bytesRem > 0);
                         buf.clear();
                         numRead = fc.read(buf);
-                        System.out.println("writing...");
                     }
-                    System.out.println("finished writing...");
                     socketChannel.close();
                     fc.close();
                 } catch (Exception e) {
@@ -166,14 +167,12 @@ public class FileServer implements Runnable {
 
         readBuffer.flip();
         byte[] bytes = new byte[readBuffer.remaining()];
-        System.out.println("DEBUG: Server: Read "+readBuffer.remaining()+" Characters");
         readBuffer.get(bytes);
         String read = new String(bytes);
-        System.out.println("DEBUG: Server: Read :"+read+" of length "+read.length());
+        log("Read :"+read+" of length "+read.length());
         int in = read.lastIndexOf("##");
         if (in != -1) {
             read = read.substring(0, in);
-            System.out.println("DEBUG: Server: readinside " + read);
             String [] msgParts = read.split("\\$");
             if(msgParts[0].equals("RECEIVE")){
                 if(msgParts.length>1) {
@@ -188,7 +187,7 @@ public class FileServer implements Runnable {
                         while (fileList.contains(keyStr)) {
                             keyStr = generateString(10);
                         }
-                        System.out.println("Generated key string " + keyStr + " for the file of " + numberOfBytes + " bytes");
+                        log("Generated key string " + keyStr + " for the file of " + numberOfBytes + " bytes");
                         receiveFile(key, numberOfBytes, keyStr);
                     }
                 }
@@ -219,7 +218,7 @@ public class FileServer implements Runnable {
             }
             fc.close();
             fileList.add(keyString);
-            System.out.println("Received file with keyString"+keyString);
+            log("Received file with keyString "+keyString);
             sendMessage(key, "RECEIVED$"+keyString+"$"+ numberOfBytes+"##");
         }catch (Exception e ){
             e.printStackTrace();
@@ -234,7 +233,6 @@ public class FileServer implements Runnable {
             }
             synchronized (pendingFile) {
                 pendingFile.put(socketChannel, keyString);
-                System.out.println("DEBUG: Server: Filename added to pending data");
             }
         }
         selector.wakeup();

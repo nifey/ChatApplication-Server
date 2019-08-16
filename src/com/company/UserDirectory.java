@@ -9,17 +9,25 @@ import java.util.Set;
 public class UserDirectory {
     private HashMap<String, SelectionKey> nameToKey;
     private HashMap<SelectionKey, String> keyToName;
+    private HashMap<String, SelectionKey> offlineNameToKey;
+    private HashMap<SelectionKey, String> offlineKeyToName;
 
     public UserDirectory(){
         nameToKey = new HashMap<String, SelectionKey>();
         keyToName = new HashMap<SelectionKey, String>();
+        offlineNameToKey = new HashMap<String, SelectionKey>();
+        offlineKeyToName = new HashMap<SelectionKey, String>();
     }
 
-    public synchronized String getOnlineUsers(){
+    public synchronized String getRegisteredUsers(){
         Iterator<String> iter = nameToKey.keySet().iterator();
         ArrayList<String> userList = new ArrayList<String>();
         while(iter.hasNext()){
             userList.add(iter.next());
+        }
+        Iterator<String> offlineIter = offlineNameToKey.keySet().iterator();
+        while(offlineIter.hasNext()){
+            userList.add(offlineIter.next());
         }
         java.util.Collections.sort(userList);
         return String.join(",",userList);
@@ -29,19 +37,27 @@ public class UserDirectory {
         return nameToKey.containsKey(name);
     }
 
-    public synchronized Boolean keyPresent(SelectionKey key){
+    public synchronized Boolean isOnline(SelectionKey key){
         return keyToName.containsKey(key);
     }
 
     public synchronized String getName(SelectionKey key) {
-        return keyToName.get(key);
+        if(keyToName.containsKey(key)) {
+            return keyToName.get(key);
+        } else {
+            return offlineKeyToName.get(key);
+        }
     }
 
     public synchronized SelectionKey getKey(String name) {
-        return nameToKey.get(name);
+        SelectionKey key = nameToKey.get(name);
+        if(key == null){
+            key = offlineNameToKey.get(name);
+        }
+        return key;
     }
 
-    public synchronized Set<SelectionKey> getAllKey(){
+    public synchronized Set<SelectionKey> getAllOnlineKey(){
         return keyToName.keySet();
     }
 
@@ -49,20 +65,19 @@ public class UserDirectory {
         if(!nameToKey.containsKey(name) && !keyToName.containsKey(key)){
             nameToKey.put(name, key);
             keyToName.put(key, name);
+            if(offlineNameToKey.containsKey(name)){
+                SelectionKey oldKey = offlineNameToKey.get(name);
+                offlineNameToKey.remove(name);
+                offlineKeyToName.remove(oldKey);
+            }
         }
     }
 
     public synchronized void deleteKey(SelectionKey key){
         if(keyToName.containsKey(key)){
             String name = keyToName.get(key);
-            keyToName.remove(key);
-            nameToKey.remove(name);
-        }
-    }
-
-    public synchronized void deleteName(String name){
-        if(nameToKey.containsKey(name)){
-            SelectionKey key = nameToKey.get(name);
+            offlineKeyToName.put(key, name);
+            offlineNameToKey.put(name, key);
             keyToName.remove(key);
             nameToKey.remove(name);
         }

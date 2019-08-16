@@ -8,8 +8,15 @@ import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.*;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class Server implements Runnable{
+    private static Logger logger = null;
+    static {
+        System.setProperty("java.util.logging.SimpleFormatter.format", "[%1$tF %1$tT] [%4$-7s] %5$s %n");
+        logger = Logger.getLogger(Server.class.getName());
+    }
     private ServerSocketChannel serverSocket;
     private Selector selector;
     UserDirectory ud;
@@ -18,6 +25,7 @@ public class Server implements Runnable{
     private ArrayList<Task> unprocessedTasks = new ArrayList<Task>();
     private HashMap pendingData = new HashMap();
     private List channelsToWrite = new ArrayList<SocketChannel>();
+    private HashMap<String, ArrayList> unsentMessages = new HashMap<String, ArrayList>();
 
     public Server(String hostname, int port) {
         ud = new UserDirectory();
@@ -30,12 +38,17 @@ public class Server implements Runnable{
             selector = Selector.open();
             serverSocket.register(selector, SelectionKey.OP_ACCEPT);
         } catch (IOException e) {
+            logger.severe(this.getClass() + " : Could not create server socket channel");
             e.printStackTrace();
         }
     }
 
+    private void log(String msg){
+        logger.info(this.getClass()+ " : "+ msg);
+    }
+
     public void run(){
-        System.out.println("DEBUG: Server: Started");
+        log("Started");
         while(true){
             try {
                 synchronized (channelsToWrite){
@@ -45,16 +58,12 @@ public class Server implements Runnable{
                         SelectionKey key = socketChannel.keyFor(selector);
                         if(key!=null && key.isValid()) {
                             key.interestOps(SelectionKey.OP_WRITE);
-                        } else {
-                            ud.deleteKey(key);
-                            gd.removeByKey(key);
-                            socketChannel.close();
                         }
                     }
                     channelsToWrite.clear();
                 }
 
-                System.out.println("DEBUG: Server: Selector waiting for event");
+                log("Selector waiting for event");
                 this.selector.select();
                 Iterator<SelectionKey> iter = this.selector.selectedKeys().iterator();
 
@@ -68,13 +77,11 @@ public class Server implements Runnable{
                         SocketChannel client = serverSocket.accept();
                         client.configureBlocking(false);
                         client.register(selector, SelectionKey.OP_READ);
-                        System.out.println("DEBUG: Server: Accepted connection");
+                        log("Accepted connection from "+ client.getRemoteAddress());
                     } else if (currentKey.isReadable()) {
                         this.read(currentKey);
-                        System.out.println("DEBUG: Server: Finished reading data");
                     } else if (currentKey.isWritable()){
                         this.write(currentKey);
-                        System.out.println("DEBUG: Server: Finished writing data");
                     }
                 }
             } catch (Exception e){
@@ -88,23 +95,21 @@ public class Server implements Runnable{
         synchronized (pendingData) {
             List pendingWriteData = (List) this.pendingData.get(socketChannel);
             while (!pendingWriteData.isEmpty()) {
-                System.out.println("DEBUG: Server: Found something to write");
                 ByteBuffer buffer = (ByteBuffer) pendingWriteData.get(0);
                 try {
                     socketChannel.write(buffer);
-                    System.out.println("DEBUG: Server: Written Data");
                     if(buffer.remaining()>0){
                         break;
                     }
                     pendingWriteData.remove(0);
                 } catch (IOException e){
+                    logger.severe(this.getClass() + " : Could not write data to socket");
                     e.printStackTrace();
                 }
             }
 
             if(pendingWriteData.isEmpty()){
                 key.interestOps(SelectionKey.OP_READ);
-                System.out.println("DEBUG: Server: Nothing more to write in that channel");
             }
         }
     }
@@ -136,20 +141,17 @@ public class Server implements Runnable{
 
         readBuffer.flip();
         byte[] bytes = new byte[readBuffer.remaining()];
-        System.out.println("DEBUG: Server: Read "+readBuffer.remaining()+" Characters");
         readBuffer.get(bytes);
         String read = new String(bytes);
-        System.out.println("DEBUG: Server: Read :"+read+" of length "+read.length());
+        log("Read :"+read+" of length "+read.length());
         synchronized (unprocessedTasks) {
             int in = read.lastIndexOf("##");
             if (in != -1) {
                 read = read.substring(0, in);
-                System.out.println("DEBUG: Server: readinside " + read);
                 for (String taskStr : read.split("##")) {
-                    System.out.println("DEBUG: Server: taskstr: " + taskStr);
                     unprocessedTasks.add(new Task(key, taskStr));
                     unprocessedTasks.notify();
-                    System.out.println("DEBUG: Server: Task Added " + taskStr);
+                    log("Task Added :" + taskStr);
                 }
             }
         }
@@ -164,26 +166,77 @@ public class Server implements Runnable{
                     e.printStackTrace();
                 }
             }
-            System.out.println("DEBUG: Server: Got a task");
             return unprocessedTasks.remove(0);
         }
     }
 
     void send(SelectionKey key, String msg){
-        SocketChannel socketChannel = (SocketChannel) key.channel();
-        synchronized (channelsToWrite) {
-            channelsToWrite.add(socketChannel);
-            synchronized (pendingData) {
-                List dataList = (List) pendingData.get(socketChannel);
-                if(dataList == null){
-                    dataList = new ArrayList();
-                    pendingData.put(socketChannel, dataList);
+        if(this.ud.isOnline(key)) {
+            SocketChannel socketChannel = (SocketChannel) key.channel();
+            synchronized (channelsToWrite) {
+                channelsToWrite.add(socketChannel);
+                synchronized (pendingData) {
+                    List dataList = (List) pendingData.get(socketChannel);
+                    if (dataList == null) {
+                        dataList = new ArrayList();
+                        pendingData.put(socketChannel, dataList);
+                    }
+                    dataList.add(ByteBuffer.wrap(msg.getBytes()));
                 }
-                dataList.add(ByteBuffer.wrap(msg.getBytes()));
-                System.out.println("DEBUG: Server: Data added to pending data");
+            }
+            selector.wakeup();
+        } else {
+            String username = ud.getName(key);
+            if(username == null){
+                return;
+            }
+            synchronized (unsentMessages) {
+                ArrayList<String> messages = unsentMessages.get(username);
+                if (messages == null) {
+                    messages = new ArrayList<String>();
+                    unsentMessages.put(username, messages);
+                }
+                messages.add(msg);
+                log("Added message: "+ msg + " to unsent messages as "+username + " is not online");
             }
         }
-        selector.wakeup();
+    }
+
+    void sendUnsentMessages(String username){
+        SelectionKey key = this.ud.getKey(username);
+        if(this.ud.isOnline(key)){
+            SocketChannel socketChannel = (SocketChannel) key.channel();
+            synchronized (unsentMessages){
+               if(unsentMessages.containsKey(username)) {
+                   ArrayList<String> messages = unsentMessages.get(username);
+                   if(messages.size()==0){
+                       return;
+                   }
+                   log("Sending unsent messages to "+ username);
+                   synchronized (channelsToWrite) {
+                       channelsToWrite.add(socketChannel);
+                       synchronized (pendingData) {
+                           List dataList = (List) pendingData.get(socketChannel);
+                           if (dataList == null) {
+                               dataList = new ArrayList();
+                               pendingData.put(socketChannel, dataList);
+                           }
+                           for (String message : messages) {
+                               dataList.add(ByteBuffer.wrap(message.getBytes()));
+                           }
+                           unsentMessages.remove(username);
+                       }
+                   }
+                   selector.wakeup();
+               }
+           }
+        }
+    }
+
+    boolean hasUnsentMessages(String username){
+        synchronized (unsentMessages) {
+            return unsentMessages.containsKey(username);
+        }
     }
 
 }

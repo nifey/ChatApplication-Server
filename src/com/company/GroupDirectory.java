@@ -1,91 +1,90 @@
 package com.company;
 
-import java.nio.channels.SelectionKey;
 import java.util.HashMap;
 import java.util.ArrayList;
 
 public class GroupDirectory{
-    private HashMap<SelectionKey, ArrayList<String>> keyToGroupnames = new HashMap<>();
-    private HashMap<String, ArrayList<SelectionKey>> groupnameToKeys = new HashMap<>();
+    private HashMap<String, ArrayList<String>> usernameToGroupnames = new HashMap<>();
+    private HashMap<String, ArrayList<String>> groupnameToUsername = new HashMap<>();
 
-    public synchronized void put(SelectionKey key, String groupname) {
-        if (!keyToGroupnames.containsKey(key)) {
-            keyToGroupnames.put(key, new ArrayList<>());
+    public synchronized void put(String username, String groupname) {
+        if (!usernameToGroupnames.containsKey(username)) {
+            usernameToGroupnames.put(username, new ArrayList<>());
         }
-        keyToGroupnames.get(key).add(groupname);
+        usernameToGroupnames.get(username).add(groupname);
 
-        if (!groupnameToKeys.containsKey(groupname)) {
-            groupnameToKeys.put(groupname, new ArrayList<>());
+        if (!groupnameToUsername.containsKey(groupname)) {
+            groupnameToUsername.put(groupname, new ArrayList<>());
         }
-        groupnameToKeys.get(groupname).add(key);
+        groupnameToUsername.get(groupname).add(username);
     }
 
-    public synchronized String getGroups(SelectionKey key){
-        if(!keyToGroupnames.containsKey(key)){
+    public synchronized String getGroups(String username){
+        if(!usernameToGroupnames.containsKey(username)){
             return "";
         }
-        ArrayList<String> groupList = keyToGroupnames.get(key);
+        ArrayList<String> groupList = usernameToGroupnames.get(username);
         java.util.Collections.sort(groupList);
         return String.join(",",groupList);
     }
 
-    public synchronized ArrayList<String> getGroupnames(SelectionKey key) {
-        return keyToGroupnames.get(key);
-    }
-
-    public synchronized ArrayList<SelectionKey> getKeys(String groupname) {
-        return groupnameToKeys.get(groupname);
+    public synchronized ArrayList<String> getUsernames(String groupname) {
+        return groupnameToUsername.get(groupname);
     }
 
     public synchronized Boolean groupExists(String groupname){
-        return groupnameToKeys.containsKey(groupname);
+        return groupnameToUsername.containsKey(groupname);
     }
 
-    public synchronized Boolean isInGroup(SelectionKey key, String groupname){
-        return groupnameToKeys.get(groupname).contains(key);
+    public synchronized Boolean usernameExists(String username) {
+        return usernameToGroupnames.containsKey(username);
     }
 
-    public synchronized void removeFromGroup(SelectionKey key, String groupname){
+        public synchronized Boolean isInGroup(String key, String groupname){
+        return groupnameToUsername.get(groupname).contains(key);
+    }
+
+    public synchronized void removeFromGroup(String key, String groupname){
         if(groupExists(groupname) && isInGroup(key, groupname)) {
-            groupnameToKeys.get(groupname).remove(key);
-            if (groupnameToKeys.get(groupname).size() == 0) {
-                groupnameToKeys.remove(groupname);
+            groupnameToUsername.get(groupname).remove(key);
+            if (groupnameToUsername.get(groupname).size() == 0) {
+                groupnameToUsername.remove(groupname);
             }
-            keyToGroupnames.get(key).remove(groupname);
-            if (keyToGroupnames.get(key).size() == 0) {
-                keyToGroupnames.remove(key);
+            usernameToGroupnames.get(key).remove(groupname);
+            if (usernameToGroupnames.get(key).size() == 0) {
+                usernameToGroupnames.remove(key);
             }
         }
     }
 
-    public synchronized void removeByKey(SelectionKey key) {
-        ArrayList<String> itemsToRemove = keyToGroupnames.remove(key);
+    public synchronized void removeByUsername(String key) {
+        ArrayList<String> itemsToRemove = usernameToGroupnames.remove(key);
         if(itemsToRemove == null ){
             return;
         }
         for (String item : itemsToRemove) {
-            groupnameToKeys.get(item).remove(key);
-            if(groupnameToKeys.get(item).size()==0){
-                groupnameToKeys.remove(item);
+            groupnameToUsername.get(item).remove(key);
+            if(groupnameToUsername.get(item).size()==0){
+                groupnameToUsername.remove(item);
             }
         }
     }
 
-    public synchronized ArrayList<SelectionKey> removeByGroupname(String groupname) {
-        ArrayList<SelectionKey> itemsToRemove = groupnameToKeys.remove(groupname);
+    public synchronized ArrayList<String> removeByGroupname(String groupname) {
+        ArrayList<String> itemsToRemove = groupnameToUsername.remove(groupname);
         if(itemsToRemove == null){
-            return new ArrayList<SelectionKey>();
+            return new ArrayList<String>();
         }
-        for (SelectionKey item : itemsToRemove) {
-            keyToGroupnames.get(item).remove(groupname);
-            if(keyToGroupnames.get(item).size()==0){
-                keyToGroupnames.remove(item);
+        for (String item : itemsToRemove) {
+            usernameToGroupnames.get(item).remove(groupname);
+            if(usernameToGroupnames.get(item).size()==0){
+                usernameToGroupnames.remove(item);
             }
         }
         return itemsToRemove;
     }
 
-    public synchronized SelectionKey getGroupAdminKey(String groupname){
-        return groupnameToKeys.get(groupname).get(0);
+    public synchronized String getGroupAdminUsername(String groupname){
+        return groupnameToUsername.get(groupname).get(0);
     }
 }
