@@ -40,8 +40,8 @@ public class GroupDirectory{
         return usernameToGroupnames.containsKey(username);
     }
 
-        public synchronized Boolean isInGroup(String key, String groupname){
-        return groupnameToUsername.get(groupname).contains(key);
+        public synchronized Boolean isInGroup(String username, String groupname){
+        return groupnameToUsername.get(groupname).contains(username);
     }
 
     public synchronized void removeFromGroup(String key, String groupname){

@@ -170,8 +170,9 @@ public class Server implements Runnable{
         }
     }
 
-    void send(SelectionKey key, String msg){
-        if(this.ud.isOnline(key)) {
+    void send(String username, String msg){
+        if(this.ud.isOnline(username)) {
+            SelectionKey key = ud.getKey(username);
             SocketChannel socketChannel = (SocketChannel) key.channel();
             synchronized (channelsToWrite) {
                 channelsToWrite.add(socketChannel);
@@ -186,10 +187,6 @@ public class Server implements Runnable{
             }
             selector.wakeup();
         } else {
-            String username = ud.getName(key);
-            if(username == null){
-                return;
-            }
             synchronized (unsentMessages) {
                 ArrayList<String> messages = unsentMessages.get(username);
                 if (messages == null) {
@@ -203,8 +200,8 @@ public class Server implements Runnable{
     }
 
     void sendUnsentMessages(String username){
-        SelectionKey key = this.ud.getKey(username);
-        if(this.ud.isOnline(key)){
+        if(this.ud.isOnline(username)){
+            SelectionKey key = this.ud.getKey(username);
             SocketChannel socketChannel = (SocketChannel) key.channel();
             synchronized (unsentMessages){
                if(unsentMessages.containsKey(username)) {
@@ -237,6 +234,22 @@ public class Server implements Runnable{
         synchronized (unsentMessages) {
             return unsentMessages.containsKey(username);
         }
+    }
+
+    void sendKey(SelectionKey key, String msg){
+        SocketChannel socketChannel = (SocketChannel) key.channel();
+        synchronized (channelsToWrite) {
+            channelsToWrite.add(socketChannel);
+            synchronized (pendingData) {
+                List dataList = (List) pendingData.get(socketChannel);
+                if (dataList == null) {
+                    dataList = new ArrayList();
+                    pendingData.put(socketChannel, dataList);
+                }
+                dataList.add(ByteBuffer.wrap(msg.getBytes()));
+            }
+        }
+        selector.wakeup();
     }
 
 }

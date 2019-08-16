@@ -37,8 +37,10 @@ public class UserDirectory {
         return nameToKey.containsKey(name);
     }
 
-    public synchronized Boolean isOnline(SelectionKey key){
-        return keyToName.containsKey(key);
+    public synchronized Boolean isKeyOnline(SelectionKey key){ return keyToName.containsKey(key);}
+
+    public synchronized Boolean isOnline(String username){
+        return nameToKey.containsKey(username);
     }
 
     public synchronized String getName(SelectionKey key) {
@@ -55,6 +57,10 @@ public class UserDirectory {
             key = offlineNameToKey.get(name);
         }
         return key;
+    }
+
+    public synchronized Boolean isRegistered(String name){
+        return nameToKey.containsKey(name) || offlineNameToKey.containsKey(name);
     }
 
     public synchronized Set<SelectionKey> getAllOnlineKey(){
