@@ -168,11 +168,12 @@ public class FileServer implements Runnable {
         readBuffer.flip();
         byte[] bytes = new byte[readBuffer.remaining()];
         readBuffer.get(bytes);
-        String read = new String(bytes);
-        log("Read :"+read+" of length "+read.length());
-        int in = read.lastIndexOf("##");
+        String fullRead = new String(bytes);
+        log("Read :"+fullRead+" of length "+fullRead.length());
+        int in = fullRead.lastIndexOf("##");
         if (in != -1) {
-            read = read.substring(0, in);
+            String read = fullRead.substring(0, in);
+            log("Read :"+read+" of length "+read.length());
             String [] msgParts = read.split("\\$");
             if(msgParts[0].equals("RECEIVE")){
                 if(msgParts.length>1) {
@@ -188,7 +189,8 @@ public class FileServer implements Runnable {
                             keyStr = generateString(10);
                         }
                         log("Generated key string " + keyStr + " for the file of " + numberOfBytes + " bytes");
-                        receiveFile(key, numberOfBytes, keyStr);
+                        ByteBuffer fileContents = ByteBuffer.wrap(fullRead.substring(in + 2).getBytes());
+                        receiveFile(key, numberOfBytes, keyStr, fileContents);
                     }
                 }
             } else if (msgParts[0].equals("SEND")){
@@ -201,12 +203,19 @@ public class FileServer implements Runnable {
         }
     }
 
-    private void receiveFile(SelectionKey key, int numberOfBytes, String keyString){
+    private void receiveFile(SelectionKey key, int numberOfBytes, String keyString, ByteBuffer fileContents){
         SocketChannel socketChannel = (SocketChannel) key.channel();
         try {
             FileChannel fc = new FileOutputStream(new File(fileDirPath+"/"+keyString)).getChannel();
             ByteBuffer buf = ByteBuffer.allocate(512);
             int numRead = 0;
+            if(fileContents.remaining() > 0){
+                int bytes = fileContents.remaining();
+                while(fileContents.remaining()>0){
+                    fc.write(fileContents);
+                }
+                numRead = numRead + bytes;
+            }
             while(numRead < numberOfBytes){
                 int bytes = socketChannel.read(buf);
                 buf.flip();
