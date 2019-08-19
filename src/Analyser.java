@@ -13,7 +13,7 @@ import java.util.concurrent.CyclicBarrier;
 
 public class Analyser {
 
-    public static void main(String args[]) {
+    public static void main(String[] args) {
         if(args.length<2){
             System.out.println("enter no of threads and no of messages");
             System.exit(0);
@@ -21,25 +21,40 @@ public class Analyser {
         int numThreads = Integer.parseInt(args[0]);
         int numMessages = Integer.parseInt(args[1]);
         final CyclicBarrier gate = new CyclicBarrier(numThreads+1);
+        final CyclicBarrier endGate = new CyclicBarrier(numThreads+1);
         for (int count = 0; count < numThreads; count++) {
-            new Thread(new EchoClient("localhost",12121, count, gate,numMessages)).start();
+            new Thread(new EchoClient("localhost",12121, count, gate, endGate,numMessages)).start();
         }
         try{
             gate.await();
         } catch (Exception e){
             e.printStackTrace();
         }
+
+        try{
+            endGate.await();
+        } catch (Exception e){
+            e.printStackTrace();
+        }
+
+        double sum = 0;
+        for(Object item: EchoClient.latList){
+            sum += (double) item;
+        }
+        double avg = (double)sum/((double)numMessages * (double)numThreads);
+        System.out.println("Global average latency: " + avg);
     }
 
     static class EchoClient implements Runnable {
+        static ArrayList<Object> latList = new ArrayList<>();
         SocketChannel socketChannel;
         private Selector selector;
         private ByteBuffer readBuffer = ByteBuffer.allocate(4092);
-        private ArrayList<String> pendingWriteData = new ArrayList<String>();
+        private ArrayList<String> pendingWriteData = new ArrayList<>();
         private HashMap<String, Object> stringMap;
-        private ArrayList<Object> latencies = new ArrayList<Object>();
+        private ArrayList<Object> latencies = new ArrayList<>();
         String username;
-        CyclicBarrier gate;
+        CyclicBarrier gate, endGate;
         int threadNumber;
         private Boolean firstWrite = true;
         private Boolean gotMsg = false;
@@ -47,8 +62,9 @@ public class Analyser {
         private int numMessages;
         private int gotMessages;
 
-        public EchoClient(String hostname, int port, int threadNumber, CyclicBarrier gate, int numMessages) {
+        public EchoClient(String hostname, int port, int threadNumber, CyclicBarrier gate, CyclicBarrier endGate, int numMessages) {
             this.gate = gate;
+            this.endGate = endGate;
             this.threadNumber = threadNumber;
             this.username = generateRandomString(10);
             this.stringMap =  new HashMap<String, Object>();
@@ -121,14 +137,20 @@ public class Analyser {
                 }
             }
 
-            double sum = 0;
             latencies.remove(0);
             for(Object latency: latencies){
-                sum += (double) latency;
+                addToList((double)latency);
             }
-            double avg = (double)sum/(double)numMessages;
-            System.out.println(avg);
 
+            try{
+                endGate.await();
+            } catch (Exception e){
+                e.printStackTrace();
+            }
+        }
+
+        private void addToList(double latency){
+            latList.add(latency);
         }
 
         private void send(String msg) {
@@ -218,5 +240,4 @@ public class Analyser {
             }
         }
     }
-
 }

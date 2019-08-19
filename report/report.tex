@@ -10,7 +10,7 @@
 
 \section{Introduction}
 
-The objective set by this assignment is to create a chat application using java that enables users to send messages to other users one on one or in a group.
+The objective set by this assignment is to create a chat application using java that enables users to send messages and transfer files to other users one on one or in a group.
 
 \section{Design}
 
@@ -47,6 +47,20 @@ It stores the username and their corresponding SelectionKey which can be used to
 
 The group directory contains a list of groups created and the users who are present in that group. Whenever a group message is received, the server retrieves the list of users in that group and sends the message to all of them.
 
+\subsection{File transfer architecture}
+
+\begin{figure}
+	\includegraphics[width=\linewidth]{fileserver.png}
+	\caption{File server Architecture}
+	\label{fig:fileserverarchitecture}
+\end{figure}
+
+The file transfer is done through the use of a different thread on the server that listens for requests on a different port. When a client wants to send a file to another client, The client first sends the file to the fileserver. The fileserver on receipt of the file will generate a random KeyString that identifies the file. The client then sends the KeyString to the receipient of the file. The receipient then requests for the file by sending the KeyString to the file server thread.
+
+In the current design, the fileserver thread blocks on file send and receive. But it can be extended to also use the Selector pattern to improve throughput.
+
+\subsection{Message processing}
+
 Messages are processed using string patterns.
 Messages exchanged between the server and the client are of the form
 
@@ -78,9 +92,18 @@ Some of the message types used are
 
 		This deletes the group given by the GroupName
 
+	\item FILE\$Reciever\$Filename\$NumberOfBytes\$KeyString\#\#
+
+		This command is used to send a file to the receiver by sharing the keystring with which the receiver can download the file from the file server.
+
+	\item GFILE\$GroupName\$Filename\$NumberOfBytes\$KeyString\#\#
+
+		This command is used to send a file identified by the KeyString to every member of the group identified by GroupName.
+
 	\item LOGOUT\#\#
 
 		This logs the user out. The server deletes the user from the user directory
+
 \end{itemize}
 
 \section{Analysis}
@@ -99,6 +122,15 @@ We can see a slight decrease in response time when using multiple worker threads
 
 \section{Conclusion}
 
-Thus the Chat server for P2P and group chat is implemented using Java Nio and the client application is implemented using JavaFx and Java Nio.
+Thus the Chat server for P2P and group chat and file transfer is implemented using Java Nio and the client application is implemented using JavaFx and Java Nio.
+
+\begin{thebibliography}{1}
+
+	\bibitem{javanio} Java NIO tutorial {http://rox-xmlrpc.sourceforge.net/niotut/}
+	\bibitem{javafx} Getting started with JavaFX {https://openjfx.io/openjfx-docs/}
+	\bibitem{javaniocs} Java NIO server client example {https://crunchify.com/java-nio-non-blocking-io-with-server-client-example-java-nio-bytebuffer-and-channels-selector-java-nio-vs-io/}
+	\bibitem{logging} Java logging basics {https://www.loggly.com/ultimate-guide/java-logging-basics/}
+
+\end{thebibliography}
 
 \end{document}
